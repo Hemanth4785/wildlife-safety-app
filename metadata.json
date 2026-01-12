@@ -1,0 +1,7 @@
+{
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "name": "Wildlife Safe-Route Predictor",
+  "description": ""
+}
