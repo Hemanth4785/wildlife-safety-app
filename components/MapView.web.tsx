@@ -18,7 +18,7 @@ const useLocalStorage = <T,>(key: string, initialValue: T): [T, (value: T | ((va
             const item = window.localStorage.getItem(key);
             return item ? JSON.parse(item) : initialValue;
         } catch (error: any) {
-            console.error(error);
+            // Silently fail and return initial value
             return initialValue;
         }
     });
@@ -29,7 +29,7 @@ const useLocalStorage = <T,>(key: string, initialValue: T): [T, (value: T | ((va
             setStoredValue(valueToStore);
             window.localStorage.setItem(key, JSON.stringify(valueToStore));
         } catch (error: any) {
-            console.error(error);
+            // Silently fail - localStorage might be full or disabled
         }
     };
     return [storedValue, setValue];
@@ -366,7 +366,7 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = (props) => {
             setSelectedStart(location);
             setStartQuery(location.name.split(',').slice(0, 2).join(', '));
         } catch (error: any) {
-            console.error("Error getting current location:", error);
+            // Error already handled by getCurrentLocation
             setStartQuery("Could not fetch location");
         } finally {
             setIsGettingLocation(false);

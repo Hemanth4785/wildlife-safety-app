@@ -1,147 +1,414 @@
 import React, { useState } from 'react';
-// FIX: Corrected import path for types
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import * as Location from 'expo-location';
 import type { Report } from '../types';
-// FIX: Corrected import path for icons
 import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon } from './icons';
 
 const WILDLIFE_TYPES = ["Bear", "Mountain Lion", "Wolf", "Elk", "Moose", "Deer", "Coyote", "Bobcat"];
 
 interface ReportsViewProps {
     reports: Report[];
-    onAddReport: (report: Omit<Report, 'id' | 'timestamp'>) => void;
+    onAddReport: (report: Omit<Report, 'id' | 'timestamp'>) => Promise<void>;
 }
 
 const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
     const [activeTab, setActiveTab] = useState<'submit' | 'recent'>('submit');
-
     const [wildlifeType, setWildlifeType] = useState('');
     const [location, setLocation] = useState('');
     const [description, setDescription] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    const handleUseCurrentLocation = () => {
-        if (navigator.geolocation) {
+    const handleUseCurrentLocation = async () => {
+        try {
             setLocation("Fetching location...");
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    const { latitude, longitude } = position.coords;
-                    setLocation(`Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}`);
-                },
-                (error: GeolocationPositionError) => {
-                    let errorMessage = "Could not get location. Please enter manually.";
-                    switch (error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMessage = "Location access denied. Please enable it in your browser settings.";
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMessage = "Location information is unavailable at the moment.";
-                            break;
-                        case error.TIMEOUT:
-                            errorMessage = "The request to get user location timed out.";
-                            break;
-                    }
-                    setLocation(errorMessage); 
-                    console.error("Geolocation error:", error.message);
-                }
-            );
-        } else {
-           setLocation("Geolocation is not supported by this browser.");
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                setLocation("Location permission denied. Please enable it in settings.");
+                return;
+            }
+            const position = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            const { latitude, longitude } = position.coords;
+            setLocation(`Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}`);
+        } catch (error: any) {
+            let errorMessage = "Could not get location. Please enter manually.";
+            if (error.code === 'E_LOCATION_SERVICES_DISABLED') {
+                errorMessage = "Location services are disabled. Please enable them in settings.";
+            } else if (error.code === 'E_LOCATION_UNAVAILABLE') {
+                errorMessage = "Location information is unavailable at the moment.";
+            } else if (error.code === 'E_LOCATION_TIMEOUT') {
+                errorMessage = "The request to get user location timed out.";
+            }
+            setLocation(errorMessage);
+            // Error handling is done above
         }
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleSubmit = async () => {
         if (!wildlifeType || !location || !description) {
-            alert("Please fill in all required fields.");
+            Alert.alert("Error", "Please fill in all required fields.");
             return;
         }
         setIsSubmitting(true);
-        // Simulate network delay
-        setTimeout(() => {
-            onAddReport({ wildlifeType, location, description });
+        try {
+            await onAddReport({ wildlifeType, location, description });
             setWildlifeType('');
             setLocation('');
             setDescription('');
+            setActiveTab('recent');
+        } catch (error) {
+            Alert.alert("Error", "Failed to submit report. Please try again.");
+        } finally {
             setIsSubmitting(false);
-            setActiveTab('recent'); // Switch to recent reports after submission
-        }, 1000);
+        }
     };
 
     return (
-        <div className="h-full w-full bg-gray-50 flex flex-col">
-            <header className="p-4 bg-white border-b border-gray-200">
-                <h1 className="text-xl font-bold text-gray-800">Wildlife Reports</h1>
-                <p className="text-sm text-gray-500">Help keep the community safe</p>
-            </header>
+        <View style={styles.container}>
+            <View style={styles.header}>
+                <Text style={styles.headerTitle}>Wildlife Reports</Text>
+                <Text style={styles.headerSubtitle}>Help keep the community safe</Text>
+            </View>
             
-            <div className="p-4">
-                <div className="flex bg-gray-200 rounded-lg p-1">
-                    <button onClick={() => setActiveTab('submit')} className={`w-1/2 p-2 rounded-md text-sm font-semibold transition-colors ${activeTab === 'submit' ? 'bg-white text-emerald-600 shadow' : 'text-gray-600'}`}><PlusIcon className="inline-block w-4 h-4 mr-1"/> Submit Report</button>
-                    <button onClick={() => setActiveTab('recent')} className={`w-1/2 p-2 rounded-md text-sm font-semibold transition-colors ${activeTab === 'recent' ? 'bg-white text-emerald-600 shadow' : 'text-gray-600'}`}><CalendarIcon className="inline-block w-4 h-4 mr-1"/> Recent Reports</button>
-                </div>
-            </div>
+            <View style={styles.tabContainer}>
+                <View style={styles.tabs}>
+                    <TouchableOpacity 
+                        onPress={() => setActiveTab('submit')} 
+                        style={[styles.tab, activeTab === 'submit' && styles.activeTab]}
+                    >
+                        <PlusIcon width={16} height={16} color={activeTab === 'submit' ? '#059669' : '#6b7280'} />
+                        <Text style={[styles.tabText, activeTab === 'submit' && styles.activeTabText]}>
+                            Submit Report
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        onPress={() => setActiveTab('recent')} 
+                        style={[styles.tab, activeTab === 'recent' && styles.activeTab]}
+                    >
+                        <CalendarIcon width={16} height={16} color={activeTab === 'recent' ? '#059669' : '#6b7280'} />
+                        <Text style={[styles.tabText, activeTab === 'recent' && styles.activeTabText]}>
+                            Recent Reports
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
 
-            <div className="flex-grow p-4 overflow-y-auto">
+            <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
                 {activeTab === 'submit' ? (
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Wildlife Type *</label>
-                            <div className="flex flex-wrap gap-2">
+                    <View style={styles.form}>
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Wildlife Type *</Text>
+                            <View style={styles.typeButtons}>
                                 {WILDLIFE_TYPES.map(type => (
-                                    <button key={type} type="button" onClick={() => setWildlifeType(type)} className={`px-4 py-2 text-sm rounded-full transition-colors ${wildlifeType === type ? 'bg-emerald-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-100'}`}>{type}</button>
+                                    <TouchableOpacity
+                                        key={type}
+                                        onPress={() => setWildlifeType(type)}
+                                        style={[styles.typeButton, wildlifeType === type && styles.typeButtonActive]}
+                                    >
+                                        <Text style={[styles.typeButtonText, wildlifeType === type && styles.typeButtonTextActive]}>
+                                            {type}
+                                        </Text>
+                                    </TouchableOpacity>
                                 ))}
-                            </div>
-                        </div>
+                            </View>
+                        </View>
 
-                        <div>
-                            <label htmlFor="location" className="block text-sm font-medium text-gray-700">Location *</label>
-                            <div className="mt-1">
-                                <input type="text" id="location" value={location} onChange={(e) => setLocation(e.target.value)} required placeholder="e.g., Trail Junction A, Mile Marker 3" className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"/>
-                            </div>
-                            <button type="button" onClick={handleUseCurrentLocation} className="mt-2 text-sm text-emerald-600 hover:underline font-semibold flex items-center gap-1"><LocationMarkerIcon className="w-4 h-4" /> Use Current Location</button>
-                        </div>
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Location *</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={location}
+                                onChangeText={setLocation}
+                                placeholder="e.g., Trail Junction A, Mile Marker 3"
+                                placeholderTextColor="#9ca3af"
+                            />
+                            <TouchableOpacity onPress={handleUseCurrentLocation} style={styles.locationButton}>
+                                <LocationMarkerIcon width={16} height={16} color="#059669" />
+                                <Text style={styles.locationButtonText}>Use Current Location</Text>
+                            </TouchableOpacity>
+                        </View>
                         
-                        <div>
-                            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description *</label>
-                            <textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={4} placeholder="Describe what you observed (behavior, size, direction of travel, etc.)" className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"></textarea>
-                        </div>
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Description *</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea]}
+                                value={description}
+                                onChangeText={setDescription}
+                                placeholder="Describe what you observed (behavior, size, direction of travel, etc.)"
+                                placeholderTextColor="#9ca3af"
+                                multiline
+                                numberOfLines={4}
+                                textAlignVertical="top"
+                            />
+                        </View>
 
-                        <div>
-                             <label className="block text-sm font-medium text-gray-700">Photo (Optional)</label>
-                             <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
-                                <div className="space-y-1 text-center">
-                                    <CameraIcon className="mx-auto h-12 w-12 text-gray-400" />
-                                    <p className="text-sm text-gray-600">Drag & drop or click to upload</p>
-                                </div>
-                             </div>
-                        </div>
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Photo (Optional)</Text>
+                            <View style={styles.photoUpload}>
+                                <CameraIcon width={48} height={48} color="#9ca3af" />
+                                <Text style={styles.photoUploadText}>Tap to upload photo</Text>
+                            </View>
+                        </View>
 
-                        <button type="submit" disabled={isSubmitting} className="w-full py-3 px-4 bg-emerald-600 text-white font-semibold rounded-lg shadow hover:bg-emerald-700 transition-colors disabled:bg-gray-400">{isSubmitting ? 'Submitting...' : 'Submit Report'}</button>
+                        <TouchableOpacity 
+                            onPress={handleSubmit} 
+                            disabled={isSubmitting}
+                            style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                        >
+                            <Text style={styles.submitButtonText}>
+                                {isSubmitting ? 'Submitting...' : 'Submit Report'}
+                            </Text>
+                        </TouchableOpacity>
                         
-                        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-r-lg text-sm flex items-center gap-3">
-                            <AlertTriangleIcon className="w-5 h-5" />
-                            <p>Only report from a safe location. If you're in immediate danger, contact emergency services.</p>
-                        </div>
-                    </form>
+                        <View style={styles.warningBox}>
+                            <AlertTriangleIcon width={20} height={20} color="#d97706" />
+                            <Text style={styles.warningText}>
+                                Only report from a safe location. If you're in immediate danger, contact emergency services.
+                            </Text>
+                        </View>
+                    </View>
                 ) : (
-                    <div className="space-y-4">
+                    <View style={styles.reportsList}>
                         {reports.length > 0 ? reports.map(report => (
-                            <div key={report.id} className="report-item">
-                                <div className="flex justify-between items-start">
-                                    <span className="text-lg font-bold text-gray-800">{report.wildlifeType}</span>
-                                    <span className="text-xs text-gray-500">{new Date(report.timestamp).toLocaleString()}</span>
-                                </div>
-                                <p className="text-sm text-gray-600 mt-1"><strong className="font-medium">Location:</strong> {report.location}</p>
-                                <p className="text-sm text-gray-800 mt-2 bg-gray-50 p-2 rounded-md">{report.description}</p>
-                            </div>
+                            <View key={report.id} style={styles.reportItem}>
+                                <View style={styles.reportHeader}>
+                                    <Text style={styles.reportType}>{report.wildlifeType}</Text>
+                                    <Text style={styles.reportDate}>
+                                        {new Date(report.timestamp).toLocaleString()}
+                                    </Text>
+                                </View>
+                                <Text style={styles.reportLocation}>
+                                    <Text style={styles.reportLabel}>Location: </Text>
+                                    {report.location}
+                                </Text>
+                                <Text style={styles.reportDescription}>{report.description}</Text>
+                            </View>
                         )) : (
-                             <p className="text-center text-gray-500 py-10">No recent reports submitted.</p>
+                            <View style={styles.emptyState}>
+                                <Text style={styles.emptyStateText}>No recent reports submitted.</Text>
+                            </View>
                         )}
-                    </div>
+                    </View>
                 )}
-            </div>
-        </div>
+            </ScrollView>
+        </View>
     );
 };
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f9fafb',
+    },
+    header: {
+        padding: 16,
+        backgroundColor: '#ffffff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    headerSubtitle: {
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    tabContainer: {
+        padding: 16,
+    },
+    tabs: {
+        flexDirection: 'row',
+        backgroundColor: '#e5e7eb',
+        borderRadius: 8,
+        padding: 4,
+    },
+    tab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 8,
+        borderRadius: 6,
+        gap: 4,
+    },
+    activeTab: {
+        backgroundColor: '#ffffff',
+    },
+    tabText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#6b7280',
+    },
+    activeTabText: {
+        color: '#059669',
+    },
+    content: {
+        flex: 1,
+    },
+    contentContainer: {
+        padding: 16,
+        paddingBottom: 32,
+    },
+    form: {
+        gap: 24,
+    },
+    formGroup: {
+        gap: 8,
+    },
+    label: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#374151',
+    },
+    typeButtons: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    typeButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#ffffff',
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+    },
+    typeButtonActive: {
+        backgroundColor: '#059669',
+        borderColor: '#059669',
+    },
+    typeButtonText: {
+        fontSize: 14,
+        color: '#374151',
+    },
+    typeButtonTextActive: {
+        color: '#ffffff',
+    },
+    input: {
+        width: '100%',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        borderRadius: 6,
+        fontSize: 14,
+        color: '#111827',
+        backgroundColor: '#ffffff',
+    },
+    textArea: {
+        height: 100,
+        paddingTop: 10,
+    },
+    locationButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+    },
+    locationButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#059669',
+    },
+    photoUpload: {
+        marginTop: 8,
+        padding: 24,
+        borderWidth: 2,
+        borderColor: '#d1d5db',
+        borderStyle: 'dashed',
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#f9fafb',
+    },
+    photoUploadText: {
+        marginTop: 8,
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    submitButton: {
+        width: '100%',
+        paddingVertical: 12,
+        backgroundColor: '#059669',
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    submitButtonDisabled: {
+        backgroundColor: '#9ca3af',
+    },
+    submitButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#ffffff',
+    },
+    warningBox: {
+        flexDirection: 'row',
+        backgroundColor: '#fef3c7',
+        borderLeftWidth: 4,
+        borderLeftColor: '#f59e0b',
+        padding: 16,
+        borderRadius: 4,
+        gap: 12,
+    },
+    warningText: {
+        flex: 1,
+        fontSize: 14,
+        color: '#92400e',
+    },
+    reportsList: {
+        gap: 16,
+    },
+    reportItem: {
+        backgroundColor: '#ffffff',
+        padding: 16,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    reportHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 8,
+    },
+    reportType: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    reportDate: {
+        fontSize: 12,
+        color: '#6b7280',
+    },
+    reportLocation: {
+        fontSize: 14,
+        color: '#6b7280',
+        marginBottom: 8,
+    },
+    reportLabel: {
+        fontWeight: '500',
+    },
+    reportDescription: {
+        fontSize: 14,
+        color: '#111827',
+        marginTop: 8,
+        backgroundColor: '#f9fafb',
+        padding: 8,
+        borderRadius: 4,
+    },
+    emptyState: {
+        paddingVertical: 40,
+        alignItems: 'center',
+    },
+    emptyStateText: {
+        fontSize: 14,
+        color: '#6b7280',
+        textAlign: 'center',
+    },
+});
 
 export default ReportsView;

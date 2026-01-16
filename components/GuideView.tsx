@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { getAIGuideResponse } from '../services/apiService';
 import type { ChatMessage } from '../types';
 import { PaperPlaneIcon, SpinnerIcon } from './icons';
@@ -12,13 +13,15 @@ const GuideView: React.FC = () => {
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const scrollViewRef = useRef<ScrollView>(null);
 
     const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        scrollViewRef.current?.scrollToEnd({ animated: true });
     };
 
-    useEffect(scrollToBottom, [messages]);
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
 
     const handleSend = async () => {
         const trimmedInput = input.trim();
@@ -29,58 +32,174 @@ const GuideView: React.FC = () => {
         setInput('');
         setIsLoading(true);
 
-        const response = await getAIGuideResponse(newMessages);
-
-        setMessages(prev => [...prev, { role: 'model', text: response }]);
-        setIsLoading(false);
+        try {
+            const response = await getAIGuideResponse(newMessages);
+            setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: response }]);
+        } catch (error: any) {
+            // Error already logged in apiService
+            setMessages((prev: ChatMessage[]) => [...prev, {
+                role: 'model',
+                text: error?.message || "I'm sorry, I'm having trouble connecting right now. Please try again later."
+            }]);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
-        <div className="flex flex-col h-full bg-white">
-            <header className="p-4 border-b border-gray-200 bg-gray-50">
-                <h1 className="text-lg font-bold text-gray-800">AI Wildlife Guide</h1>
-                <p className="text-sm text-gray-500">Your personal safety expert</p>
-            </header>
+        <KeyboardAvoidingView 
+            style={styles.container} 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={90}
+        >
+            <View style={styles.header}>
+                <Text style={styles.title}>AI Wildlife Guide</Text>
+                <Text style={styles.subtitle}>Your personal safety expert</Text>
+            </View>
             
-            <div className="flex-grow p-4 overflow-y-auto content-wrapper">
-                <div className="flex flex-col space-y-2">
-                    {messages.map((msg, index) => (
-                        <div key={index} className={`chat-bubble ${msg.role}`}>
-                           {msg.text}
-                        </div>
-                    ))}
-                    {isLoading && (
-                         <div className="chat-bubble model flex items-center gap-2">
-                            <SpinnerIcon /> <span>Thinking...</span>
-                         </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
-            </div>
+            <ScrollView 
+                ref={scrollViewRef}
+                style={styles.messagesContainer}
+                contentContainerStyle={styles.messagesContent}
+            >
+                {messages.map((msg, index) => (
+                    <View key={index} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.modelBubble]}>
+                        <Text style={[styles.messageText, msg.role === 'user' ? styles.userText : styles.modelText]}>
+                            {msg.text}
+                        </Text>
+                    </View>
+                ))}
+                {isLoading && (
+                    <View style={[styles.messageBubble, styles.modelBubble, styles.loadingBubble]}>
+                        <SpinnerIcon width={20} height={20} color="#059669" />
+                        <Text style={styles.modelText}>Thinking...</Text>
+                    </View>
+                )}
+            </ScrollView>
 
-            <div className="p-4 bg-white border-t border-gray-200">
-                <div className="flex items-center gap-2">
-                    <input
-                        type="text"
+            <View style={styles.inputContainer}>
+                <View style={styles.inputRow}>
+                    <TextInput
+                        style={styles.input}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                        onChangeText={setInput}
                         placeholder="Ask about wildlife, routes, or general tips..."
-                        className="w-full px-4 py-2 text-sm text-gray-700 bg-gray-100 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-                        disabled={isLoading}
+                        placeholderTextColor="#9ca3af"
+                        multiline={false}
+                        editable={!isLoading}
                     />
-                    <button 
-                        onClick={handleSend}
+                    <TouchableOpacity 
+                        onPress={handleSend}
                         disabled={isLoading || !input.trim()}
-                        className="p-3 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                        style={[styles.sendButton, (isLoading || !input.trim()) && styles.sendButtonDisabled]}
                     >
-                        <PaperPlaneIcon className="w-5 h-5" />
-                    </button>
-                </div>
-                 <p className="text-xs text-center text-gray-400 mt-2 px-4">Always use multiple sources for safety decisions. Trust your instincts in the field.</p>
-            </div>
-        </div>
+                        <PaperPlaneIcon width={20} height={20} color="#ffffff" />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.disclaimer}>
+                    Always use multiple sources for safety decisions. Trust your instincts in the field.
+                </Text>
+            </View>
+        </KeyboardAvoidingView>
     );
 };
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#ffffff',
+    },
+    header: {
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+        backgroundColor: '#f9fafb',
+    },
+    title: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    subtitle: {
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    messagesContainer: {
+        flex: 1,
+    },
+    messagesContent: {
+        padding: 16,
+        paddingBottom: 8,
+    },
+    messageBubble: {
+        maxWidth: '80%',
+        padding: 12,
+        borderRadius: 16,
+        marginBottom: 8,
+    },
+    userBubble: {
+        alignSelf: 'flex-end',
+        backgroundColor: '#059669',
+    },
+    modelBubble: {
+        alignSelf: 'flex-start',
+        backgroundColor: '#f3f4f6',
+    },
+    loadingBubble: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    messageText: {
+        fontSize: 14,
+        lineHeight: 20,
+    },
+    userText: {
+        color: '#ffffff',
+    },
+    modelText: {
+        color: '#111827',
+    },
+    inputContainer: {
+        padding: 16,
+        backgroundColor: '#ffffff',
+        borderTopWidth: 1,
+        borderTopColor: '#e5e7eb',
+    },
+    inputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    input: {
+        flex: 1,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        fontSize: 14,
+        color: '#374151',
+        backgroundColor: '#f3f4f6',
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        borderRadius: 20,
+    },
+    sendButton: {
+        padding: 12,
+        backgroundColor: '#059669',
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    sendButtonDisabled: {
+        backgroundColor: '#9ca3af',
+    },
+    disclaimer: {
+        fontSize: 12,
+        textAlign: 'center',
+        color: '#9ca3af',
+        marginTop: 8,
+        paddingHorizontal: 16,
+    },
+});
 
 export default GuideView;

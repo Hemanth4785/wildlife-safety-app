@@ -1,7 +1,22 @@
 import React, { useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import type { AnimalPrediction, User, WeatherData, Route } from '../types';
-import { AppState, View } from '../types';
-import { SpinnerIcon, ErrorIcon, ShieldIcon, AlertTriangleIcon, PaperPlaneIcon, ChartIcon, SunIcon, CloudIcon, RainIcon, WindIcon, MoonIcon, PartlyCloudyIcon, SnowIcon } from './icons';
+import { AppState, View as ViewType } from '../types';
+import {
+  SpinnerIcon,
+  ErrorIcon,
+  ShieldIcon,
+  AlertTriangleIcon,
+  PaperPlaneIcon,
+  ChartIcon,
+  SunIcon,
+  CloudIcon,
+  RainIcon,
+  WindIcon,
+  MoonIcon,
+  PartlyCloudyIcon,
+  SnowIcon
+} from './icons';
 import { NEARBY_KM } from '../constants';
 
 // --- Helper Functions ---
@@ -13,15 +28,15 @@ const getGreeting = () => {
 };
 
 const getWeatherInfo = (code: number, isDay: number): { text: string; icon: React.ReactNode } => {
-    const Icon = (props: React.SVGProps<SVGSVGElement>) => {
+    const getIcon = () => {
         switch (code) {
-            case 0: return isDay ? <SunIcon {...props} /> : <MoonIcon {...props} />;
-            case 1: return isDay ? <PartlyCloudyIcon {...props} /> : <MoonIcon {...props} />;
-            case 2: case 3: return <CloudIcon {...props} />;
-            case 45: case 48: return <CloudIcon {...props} />; // Fog
-            case 51: case 53: case 55: case 61: case 63: case 65: case 80: case 81: case 82: return <RainIcon {...props} />;
-            case 71: case 73: case 75: case 77: case 85: case 86: return <SnowIcon {...props} />;
-            default: return isDay ? <SunIcon {...props} /> : <MoonIcon {...props} />;
+            case 0: return isDay ? <SunIcon width={32} height={32} color="#ffffff" /> : <MoonIcon width={32} height={32} color="#ffffff" />;
+            case 1: return isDay ? <PartlyCloudyIcon width={32} height={32} color="#ffffff" /> : <MoonIcon width={32} height={32} color="#ffffff" />;
+            case 2: case 3: return <CloudIcon width={32} height={32} color="#ffffff" />;
+            case 45: case 48: return <CloudIcon width={32} height={32} color="#ffffff" />;
+            case 51: case 53: case 55: case 61: case 63: case 65: case 80: case 81: case 82: return <RainIcon width={32} height={32} color="#ffffff" />;
+            case 71: case 73: case 75: case 77: case 85: case 86: return <SnowIcon width={32} height={32} color="#ffffff" />;
+            default: return isDay ? <SunIcon width={32} height={32} color="#ffffff" /> : <MoonIcon width={32} height={32} color="#ffffff" />;
         }
     };
     const text = (() => {
@@ -37,60 +52,68 @@ const getWeatherInfo = (code: number, isDay: number): { text: string; icon: Reac
             default: return 'Clear';
         }
     })();
-    return { text, icon: <Icon className="w-8 h-8" /> };
+    return { text, icon: getIcon() };
 };
 
 // --- Child Components ---
-const StatCard: React.FC<{ icon: React.ReactNode; value: number | string; label: string; }> = ({ icon, value, label }) => (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200/80 flex flex-col items-center justify-center text-center">
-        <div className="text-emerald-600 mb-2">{icon}</div>
-        <p className="text-2xl font-bold text-gray-800">{value}</p>
-        <p className="text-xs text-gray-500 font-medium">{label}</p>
-    </div>
+const StatCard: React.FC<{ icon: React.ReactNode; value: number | string; label: string; }> = ({ icon, value, label }: { icon: React.ReactNode; value: number | string; label: string }) => (
+    <View style={styles.statCard}>
+        <View style={styles.iconContainer}>{icon}</View>
+        <Text style={styles.statValue}>{value}</Text>
+        <Text style={styles.statLabel}>{label}</Text>
+    </View>
 );
 
-const RiskLevelCard: React.FC<{ riskScore: number; riskLevel: string; speciesTracked: number; weather: WeatherData | null; }> = ({ riskScore, riskLevel, speciesTracked, weather }) => {
-    const colorClasses = {
-        Low: 'from-emerald-500 to-green-500',
-        Medium: 'from-yellow-500 to-amber-500',
-        High: 'from-red-500 to-rose-500',
+const RiskLevelCard: React.FC<{ riskScore: number; riskLevel: string; speciesTracked: number; weather: WeatherData | null; }> = ({ riskScore, riskLevel, speciesTracked, weather }: { riskScore: number; riskLevel: string; speciesTracked: number; weather: WeatherData | null }) => {
+    const getGradientColors = () => {
+        switch (riskLevel) {
+            case 'Low': return ['#10b981', '#059669'];
+            case 'Medium': return ['#eab308', '#f59e0b'];
+            case 'High': return ['#ef4444', '#dc2626'];
+            default: return ['#10b981', '#059669'];
+        }
     };
     const weatherInfo = weather ? getWeatherInfo(weather.weatherCode, weather.isDay) : null;
 
+    const backgroundColor = riskLevel === 'Low' ? '#10b981' : riskLevel === 'Medium' ? '#eab308' : '#ef4444';
+
     return (
-        <div className={`p-5 rounded-xl text-white bg-gradient-to-br ${colorClasses[riskLevel as keyof typeof colorClasses]}`}>
-            <div className="flex justify-between items-start">
-                <div>
-                    <div className="flex items-center gap-3 mb-1">
-                        <ShieldIcon className="w-6 h-6" />
-                        <h3 className="font-semibold">Current Risk Level</h3>
-                    </div>
-                    <p className="text-5xl font-bold ml-9">{riskLevel}</p>
-                    <p className="text-sm ml-9 opacity-90">Risk Score: {riskScore}/100 • {speciesTracked} species</p>
-                </div>
-                {weatherInfo && (
-                    <div className="text-right flex-shrink-0">
-                        <div className="flex items-center justify-end gap-2">
-                           {weatherInfo.icon}
-                           <p className="text-3xl font-bold">{Math.round(weather.temperature)}°C</p>
-                        </div>
-                        <p className="text-xs opacity-90">{weatherInfo.text}</p>
-                         <p className="text-xs opacity-90 flex items-center justify-end gap-1"><WindIcon className="w-3 h-3"/>{weather.windSpeed} km/h</p>
-                    </div>
+        <View style={[styles.riskCard, { backgroundColor }]}>
+            <View style={styles.riskContent}>
+                <View style={styles.riskLeft}>
+                    <View style={styles.riskHeader}>
+                        <ShieldIcon width={24} height={24} color="#ffffff" />
+                        <Text style={styles.riskTitle}>Current Risk Level</Text>
+                    </View>
+                    <Text style={styles.riskLevel}>{riskLevel}</Text>
+                    <Text style={styles.riskSubtext}>Risk Score: {riskScore}/100 • {speciesTracked} species</Text>
+                </View>
+                {weatherInfo && weather && (
+                    <View style={styles.weatherInfo}>
+                        <View style={styles.weatherRow}>
+                            {weatherInfo.icon}
+                            <Text style={styles.temperature}>{Math.round(weather.temperature)}°C</Text>
+                        </View>
+                        <Text style={styles.weatherText}>{weatherInfo.text}</Text>
+                        <View style={styles.windRow}>
+                            <WindIcon width={12} height={12} color="#ffffff" />
+                            <Text style={styles.windText}>{weather.windSpeed} km/h</Text>
+                        </View>
+                    </View>
                 )}
-            </div>
-        </div>
+            </View>
+        </View>
     );
 };
 
-const AlertItem: React.FC<{ alert: AnimalPrediction }> = ({ alert }) => (
-    <div className="flex items-center gap-3 text-sm p-3 bg-white rounded-lg shadow-sm border border-gray-200/80">
-        <span className="text-2xl">{alert.emoji}</span>
-        <div>
-            <p className="font-semibold text-gray-800">{alert.common}</p>
-            <p className="text-gray-500">{alert.current.dist_km} km away near {alert.current.addr.split(',').slice(0, 2).join(',')}</p>
-        </div>
-    </div>
+const AlertItem: React.FC<{ alert: AnimalPrediction }> = ({ alert }: { alert: AnimalPrediction }) => (
+    <View style={styles.alertItem}>
+        <Text style={styles.alertEmoji}>{alert.emoji}</Text>
+        <View style={styles.alertContent}>
+            <Text style={styles.alertName}>{alert.common}</Text>
+            <Text style={styles.alertDistance}>{alert.current.dist_km} km away near {alert.current.addr?.split(',').slice(0, 2).join(',') || 'Unknown location'}</Text>
+        </View>
+    </View>
 );
 
 // --- Main Dashboard Component ---
@@ -102,15 +125,15 @@ interface DashboardProps {
     nearbyRadiusKm: number;
     safeRoute: Route | null;
     weather: WeatherData | null;
-    onNavigate: (view: View) => void;
+    onNavigate: (view: ViewType) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = (props) => {
+const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
     const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate } = props;
 
     const dashboardStats = useMemo(() => {
-        const nearbyAlerts = predictions.filter(p => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
-        const speciesTracked = new Set(predictions.map(p => p.common)).size;
+        const nearbyAlerts = predictions.filter((p: AnimalPrediction) => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
+        const speciesTracked = new Set(predictions.map((p: AnimalPrediction) => p.common)).size;
         const totalSightings = predictions.length; 
         
         let riskScore = nearbyAlerts.length * 15 + totalSightings * 2;
@@ -132,37 +155,42 @@ const Dashboard: React.FC<DashboardProps> = (props) => {
     const greeting = getGreeting();
 
     return (
-        <div className="p-4 space-y-5 overflow-y-auto h-full pb-24 bg-gray-50">
-            <header>
-                <p className="text-gray-500 text-sm">{greeting}, {user.name.split(' ')[0]}</p>
-                <h1 className="text-2xl font-bold text-gray-800">
+        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+            <View style={styles.header}>
+                <Text style={styles.greeting}>{greeting}, {user.name.split(' ')[0]}</Text>
+                <Text style={styles.title}>
                     {status === AppState.LOADING ? 'Loading Wildlife Data...' : 'Stay Safe Out There'}
-                </h1>
-            </header>
+                </Text>
+            </View>
             
             {(status === AppState.IDLE || status === AppState.LOADING) && !predictions.length ? (
-                <div className="flex flex-col items-center justify-center gap-3 bg-white p-8 rounded-lg shadow text-center">
+                <View style={styles.emptyState}>
                     {status === AppState.LOADING ? (
-                        <SpinnerIcon className="w-8 h-8 text-emerald-500" />
+                        <SpinnerIcon width={32} height={32} color="#059669" />
                     ) : (
-                        <ShieldIcon className="w-12 h-12 text-emerald-500" />
+                        <ShieldIcon width={48} height={48} color="#059669" />
                     )}
-                    <p className="text-gray-600 font-semibold">
+                    <Text style={styles.emptyTitle}>
                         {status === AppState.LOADING ? message : 'Welcome to Wildlife Safety!'}
-                    </p>
-                    <p className="text-sm text-gray-500">
+                    </Text>
+                    <Text style={styles.emptySubtitle}>
                         {status === AppState.LOADING ? 'Fetching the latest wildlife and weather data for you.' : 'Plan a route to see risks in your area.'}
-                    </p>
+                    </Text>
                     {status === AppState.IDLE && (
-                         <button onClick={() => onNavigate(View.MAP)} className="w-full max-w-xs mt-4 py-3 bg-emerald-600 text-white font-semibold rounded-lg shadow hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
-                            <PaperPlaneIcon className="w-5 h-5" /> Plan Safe Route
-                        </button>
+                        <TouchableOpacity 
+                            style={styles.primaryButton} 
+                            onPress={() => onNavigate(ViewType.MAP)}
+                        >
+                            <PaperPlaneIcon width={20} height={20} color="#ffffff" />
+                            <Text style={styles.primaryButtonText}>Plan Safe Route</Text>
+                        </TouchableOpacity>
                     )}
-                </div>
+                </View>
             ) : status === AppState.ERROR ? (
-                 <div className="flex items-center justify-center gap-3 bg-red-100 text-red-700 p-4 rounded-lg shadow">
-                    <ErrorIcon /> <span>{message}</span>
-                </div>
+                <View style={styles.errorContainer}>
+                    <ErrorIcon width={24} height={24} color="#dc2626" />
+                    <Text style={styles.errorText}>{message}</Text>
+                </View>
             ) : (
                 <>
                     <RiskLevelCard 
@@ -172,38 +200,287 @@ const Dashboard: React.FC<DashboardProps> = (props) => {
                         weather={weather}
                     />
                     
-                    <div className="grid grid-cols-3 gap-3">
-                        <StatCard icon={<AlertTriangleIcon />} value={dashboardStats.nearbyAlerts} label="Nearby Alerts" />
-                        <StatCard icon={<PaperPlaneIcon />} value={dashboardStats.safeRoutes} label="Safe Routes" />
-                        <StatCard icon={<ChartIcon />} value={dashboardStats.totalSightings} label="Total Sightings" />
-                    </div>
+                    <View style={styles.statsGrid}>
+                        <StatCard icon={<AlertTriangleIcon width={24} height={24} color="#059669" />} value={dashboardStats.nearbyAlerts} label="Nearby Alerts" />
+                        <StatCard icon={<PaperPlaneIcon width={24} height={24} color="#059669" />} value={dashboardStats.safeRoutes} label="Safe Routes" />
+                        <StatCard icon={<ChartIcon width={24} height={24} color="#059669" />} value={dashboardStats.totalSightings} label="Total Sights" />
+                    </View>
 
-                    <div className="space-y-3">
-                         <button onClick={() => onNavigate(View.MAP)} className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-lg shadow hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
-                            <PaperPlaneIcon className="w-5 h-5" /> Plan Safe Route
-                        </button>
-                         <button onClick={() => onNavigate(View.GUIDE)} className="w-full py-3 bg-white text-emerald-600 font-semibold rounded-lg shadow border border-gray-200 hover:bg-gray-100 transition-colors">
-                            Ask AI Guide
-                        </button>
-                    </div>
+                    <View style={styles.buttonContainer}>
+                        <TouchableOpacity 
+                            style={styles.primaryButton} 
+                            onPress={() => onNavigate(ViewType.MAP)}
+                        >
+                            <PaperPlaneIcon width={20} height={20} color="#ffffff" />
+                            <Text style={styles.primaryButtonText}>Plan Safe Route</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={styles.secondaryButton} 
+                            onPress={() => onNavigate(ViewType.GUIDE)}
+                        >
+                            <Text style={styles.secondaryButtonText}>Ask AI Guide</Text>
+                        </TouchableOpacity>
+                    </View>
 
-                    <div>
-                        <h2 className="text-lg font-bold text-gray-800 mb-3">Recent Wildlife Alerts</h2>
-                        <div className="space-y-3">
+                    <View style={styles.alertsSection}>
+                        <Text style={styles.sectionTitle}>Recent Wildlife Alerts</Text>
+                        <View style={styles.alertsList}>
                             {dashboardStats.alerts.length > 0 ? (
-                                dashboardStats.alerts.map(alert => <AlertItem key={alert.id} alert={alert} />)
+                                dashboardStats.alerts.map((alert: AnimalPrediction) => <AlertItem key={alert.id} alert={alert} />)
                             ) : (
-                                <div className="text-center text-gray-500 py-6 bg-white rounded-lg shadow-sm border">
-                                    <p className="text-sm font-medium">No recent wildlife alerts in your area.</p>
-                                    <p className="text-xs text-gray-400 mt-1">It's quiet for now. Stay vigilant.</p>
-                                </div>
+                                <View style={styles.noAlerts}>
+                                    <Text style={styles.noAlertsText}>No recent wildlife alerts in your area.</Text>
+                                    <Text style={styles.noAlertsSubtext}>It's quiet for now. Stay vigilant.</Text>
+                                </View>
                             )}
-                        </div>
-                    </div>
+                        </View>
+                    </View>
                 </>
             )}
-        </div>
+        </ScrollView>
     );
 };
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f9fafb',
+    },
+    content: {
+        padding: 16,
+        paddingBottom: 100,
+    },
+    header: {
+        marginBottom: 20,
+    },
+    greeting: {
+        fontSize: 14,
+        color: '#6b7280',
+        marginBottom: 4,
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#ffffff',
+        padding: 32,
+        borderRadius: 8,
+        marginTop: 20,
+    },
+    emptyTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#374151',
+        marginTop: 12,
+        textAlign: 'center',
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        color: '#6b7280',
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fee2e2',
+        padding: 16,
+        borderRadius: 8,
+        marginTop: 20,
+    },
+    errorText: {
+        fontSize: 14,
+        color: '#dc2626',
+        marginLeft: 12,
+    },
+    riskCard: {
+        borderRadius: 12,
+        marginBottom: 20,
+        padding: 20,
+    },
+    riskContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    riskLeft: {
+        flex: 1,
+    },
+    riskHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    riskTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#ffffff',
+        marginLeft: 12,
+    },
+    riskLevel: {
+        fontSize: 48,
+        fontWeight: 'bold',
+        color: '#ffffff',
+        marginLeft: 36,
+        marginTop: 4,
+    },
+    riskSubtext: {
+        fontSize: 12,
+        color: '#ffffff',
+        opacity: 0.9,
+        marginLeft: 36,
+        marginTop: 4,
+    },
+    weatherInfo: {
+        alignItems: 'flex-end',
+    },
+    weatherRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    temperature: {
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: '#ffffff',
+        marginLeft: 8,
+    },
+    weatherText: {
+        fontSize: 12,
+        color: '#ffffff',
+        opacity: 0.9,
+    },
+    windRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    windText: {
+        fontSize: 12,
+        color: '#ffffff',
+        opacity: 0.9,
+        marginLeft: 4,
+    },
+    statsGrid: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 20,
+        gap: 12,
+    },
+    statCard: {
+        flex: 1,
+        backgroundColor: '#ffffff',
+        padding: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    iconContainer: {
+        marginBottom: 8,
+    },
+    statValue: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    statLabel: {
+        fontSize: 12,
+        color: '#6b7280',
+        fontWeight: '500',
+    },
+    buttonContainer: {
+        marginBottom: 20,
+        gap: 12,
+    },
+    primaryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#059669',
+        paddingVertical: 12,
+        borderRadius: 8,
+        gap: 8,
+    },
+    primaryButtonText: {
+        color: '#ffffff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    secondaryButton: {
+        backgroundColor: '#ffffff',
+        paddingVertical: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        alignItems: 'center',
+    },
+    secondaryButtonText: {
+        color: '#059669',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    alertsSection: {
+        marginTop: 8,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 12,
+    },
+    alertsList: {
+        gap: 12,
+    },
+    alertItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#ffffff',
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    alertEmoji: {
+        fontSize: 24,
+        marginRight: 12,
+    },
+    alertContent: {
+        flex: 1,
+    },
+    alertName: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    alertDistance: {
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    noAlerts: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#ffffff',
+        padding: 24,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    noAlertsText: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#6b7280',
+        marginBottom: 4,
+    },
+    noAlertsSubtext: {
+        fontSize: 12,
+        color: '#9ca3af',
+    },
+});
 
 export default React.memo(Dashboard);
