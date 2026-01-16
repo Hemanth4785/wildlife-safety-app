@@ -1,29 +1,56 @@
 {
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "target": "ES2022",
-    "experimentalDecorators": true,
-    "useDefineForClassFields": false,
+    /* Strictness */
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Critical fix: override Expo's invalid setting */
     "module": "ESNext",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "skipLibCheck": true,
-    "types": [
-      "node"
-    ],
     "moduleResolution": "bundler",
-    "isolatedModules": true,
-    "moduleDetection": "force",
+
+    /* Interop */
+    "resolveJsonModule": true,
     "allowJs": true,
+    "isolatedModules": true,
+
+    /* JSX */
     "jsx": "react-jsx",
+
+    /* Paths */
+    "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"]
     },
-    "allowImportingTsExtensions": true,
+
+    /* Explicit global types */
+    "types": [
+      "node",
+      "react",
+      "react-native",
+      "jest"
+    ],
+
+    /* Sanity */
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* No emit (Expo handles builds) */
     "noEmit": true
-  }
+  },
+
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.d.ts"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js",
+    "vite.config.ts"
+  ]
 }

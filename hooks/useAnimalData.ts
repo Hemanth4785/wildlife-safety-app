@@ -4,27 +4,40 @@ import { AppState } from '../types';
 import * as api from '../services/apiService';
 import * as geo from '../services/geoService';
 import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS } from '../constants';
+import { storage } from '../utils/storage';
+import { logger } from '../utils/logger';
+import * as Location from 'expo-location';
 
 const useLocalStorage = <T,>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] => {
-    const [storedValue, setStoredValue] = useState<T>(() => {
-        try {
-            const item = window.localStorage.getItem(key);
-            return item ? JSON.parse(item) : initialValue;
-        } catch (error) {
-            console.error(error);
-            return initialValue;
-        }
-    });
+    const [storedValue, setStoredValue] = useState<T>(initialValue);
+    const [isLoaded, setIsLoaded] = useState(false);
 
-    const setValue = (value: T | ((val: T) => T)) => {
+    useEffect(() => {
+        const loadValue = async () => {
+            try {
+                const item = await storage.getItem<T>(key);
+                if (item !== null) {
+                    setStoredValue(item);
+                }
+            } catch (error) {
+                logger.error(`Error loading ${key}`, error);
+            } finally {
+                setIsLoaded(true);
+            }
+        };
+        loadValue();
+    }, [key]);
+
+    const setValue = useCallback((value: T | ((val: T) => T)) => {
         try {
             const valueToStore = value instanceof Function ? value(storedValue) : value;
             setStoredValue(valueToStore);
-            window.localStorage.setItem(key, JSON.stringify(valueToStore));
+            storage.setItem(key, valueToStore);
         } catch (error) {
-            console.error(error);
+            logger.error(`Error setting ${key}`, error);
         }
-    };
+    }, [key, storedValue]);
+    
     return [storedValue, setValue];
 };
 
@@ -55,7 +68,7 @@ export const useAnimalData = () => {
     const [closestPathIndex, setClosestPathIndex] = useState(0);
     const [isApproachingStart, setIsApproachingStart] = useState(false);
     const isApproachingStartRef = useRef(false);
-    const watchIdRef = useRef<number | null>(null);
+    const watchSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
     const lastRerouteTimestampRef = useRef<number>(0);
     const isNavigatingRef = useRef(isNavigating);
     useEffect(() => {
@@ -68,7 +81,7 @@ export const useAnimalData = () => {
 
     const getPredictionsForArea = useCallback(async (location: Location): Promise<AnimalPrediction[]> => {
         if (isPredictingRef.current) {
-            console.warn("Prediction already in progress. Skipping.");
+            logger.warn("Prediction already in progress. Skipping.");
             return predictionsRef.current;
         }
         isPredictingRef.current = true;
@@ -96,6 +109,13 @@ export const useAnimalData = () => {
             setMessage(`Found sightings for ${sightingSets.length} species. Predicting paths...`);
 
             const pathPredictions = await api.predictAnimalPaths(sightingSets);
+
+            if (pathPredictions.length === 0) {
+                setStatus(AppState.SUCCESS);
+                setMessage(`Found ${sightingSets.length} species with sightings, but AI predictions are not available on mobile. Please use the web version for AI-powered path predictions.`);
+                setPredictions([]);
+                return [];
+            }
 
             const detailedPredictionsPromises = pathPredictions.map(async (predGroup) => {
                 const { scientificName, predictions: pathPoints } = predGroup;
@@ -134,7 +154,7 @@ export const useAnimalData = () => {
             setMessage(`Found ${newPredictions.length} potential wildlife paths.`);
             return newPredictions;
         } catch (error) {
-            console.error("Prediction process failed:", error);
+            logger.error("Prediction process failed", error);
             setStatus(AppState.ERROR);
             setMessage("Could not predict animal paths due to an API or network error.");
             setPredictions([]);
@@ -234,7 +254,7 @@ export const useAnimalData = () => {
             return;
         }
         setIsSuggesting(true);
-        debounceTimeout.current = window.setTimeout(async () => {
+        debounceTimeout.current = setTimeout(async () => {
             const results = await api.searchLocations(query);
             setSuggestions(results);
             setIsSuggesting(false);
@@ -244,24 +264,21 @@ export const useAnimalData = () => {
     const clearSuggestions = useCallback(() => setSuggestions([]), []);
 
     const getCurrentLocation = useCallback(async (): Promise<Location> => {
-        return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
-                reject(new Error("Geolocation is not supported by your browser."));
-                return;
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                throw new Error('Permission to access location was denied');
             }
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    const { latitude, longitude } = position.coords;
-                    const name = await api.reverseGeocode(latitude, longitude);
-                    resolve({ lat: latitude, lon: longitude, name });
-                },
-                (error) => {
-                     console.error("Geolocation error:", error);
-                     reject(new Error("Could not get current location. Please check your browser's permissions."));
-                },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-            );
-        });
+            const position = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            const { latitude, longitude } = position.coords;
+            const name = await api.reverseGeocode(latitude, longitude);
+            return { lat: latitude, lon: longitude, name };
+        } catch (error: any) {
+            logger.error("Geolocation error", error);
+            throw new Error("Could not get current location. Please check your device's permissions.");
+        }
     }, []);
     
     // Initial load effect
@@ -277,7 +294,7 @@ export const useAnimalData = () => {
                 setStatus(AppState.SUCCESS);
                 setMessage("Displaying local weather. Search an area to see wildlife risks.");
             } catch (error: any) {
-                console.error("Failed to fetch initial location/weather:", error);
+                logger.error("Failed to fetch initial location/weather", error);
                 setStatus(AppState.ERROR);
                 setMessage(error.message || "Could not fetch your location for weather data.");
             }
@@ -289,9 +306,9 @@ export const useAnimalData = () => {
     const clearNavigationAlert = useCallback(() => setNavigationAlert(null), []);
 
     const stopNavigation = useCallback(() => {
-        if (watchIdRef.current !== null) {
-            navigator.geolocation.clearWatch(watchIdRef.current);
-            watchIdRef.current = null;
+        if (watchSubscriptionRef.current !== null) {
+            watchSubscriptionRef.current.remove();
+            watchSubscriptionRef.current = null;
         }
         setIsNavigating(false);
         setLiveLocation(null);
@@ -306,7 +323,7 @@ export const useAnimalData = () => {
     const safeRouteRef = useRef(safeRoute);
     useEffect(() => { safeRouteRef.current = safeRoute; }, [safeRoute]);
 
-    const startNavigation = useCallback((nearbyRadius: number) => {
+    const startNavigation = useCallback(async (nearbyRadius: number) => {
         if (!safeRouteRef.current || !safeRouteRef.current.path || safeRouteRef.current.path.length === 0) {
             setRouteMessage('Cannot start navigation without a calculated route.');
             setRouteStatus(AppState.ERROR);
@@ -319,11 +336,24 @@ export const useAnimalData = () => {
         setIsNavigating(true);
         setNavigationAlert(null);
 
-        if (watchIdRef.current !== null) {
-            navigator.geolocation.clearWatch(watchIdRef.current);
+        if (watchSubscriptionRef.current !== null) {
+            watchSubscriptionRef.current.remove();
         }
 
-        watchIdRef.current = navigator.geolocation.watchPosition(
+        // Request permissions
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+            setNavigationAlert({ animal: null, message: 'Location permission denied. Please enable location services.' });
+            setIsNavigating(false);
+            return;
+        }
+
+        watchSubscriptionRef.current = await Location.watchPositionAsync(
+            {
+                accuracy: Location.Accuracy.High,
+                timeInterval: 1000,
+                distanceInterval: 10,
+            },
             async (position) => {
                 // If we just recovered from a GPS error, clear the alert.
                 if (navigationAlertRef.current?.message.includes("Live location signal lost")) {
@@ -409,12 +439,7 @@ export const useAnimalData = () => {
                     }
                 }
 
-            },
-            (error) => {
-                console.error("Geolocation watch error:", error);
-                setNavigationAlert({ animal: null, message: "Live location signal lost. Please check your GPS and permissions." });
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            }
         );
     }, [stopNavigation, calculateSafeRoute, clearNavigationAlert]);
 

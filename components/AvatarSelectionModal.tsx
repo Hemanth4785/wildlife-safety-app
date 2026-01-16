@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { View, Text, Modal, TouchableOpacity, StyleSheet } from 'react-native';
 import { AVATARS } from '../constants';
 import { XIcon } from './icons';
 
@@ -8,7 +9,7 @@ interface AvatarSelectionModalProps {
     onSave: (avatarId: string) => void;
 }
 
-const AvatarSelectionModal: React.FC<AvatarSelectionModalProps> = ({ currentAvatarId, onClose, onSave }) => {
+const AvatarSelectionModal: React.FC<AvatarSelectionModalProps> = ({ currentAvatarId, onClose, onSave }: AvatarSelectionModalProps) => {
     const [selectedId, setSelectedId] = useState(currentAvatarId);
 
     const handleSave = () => {
@@ -16,38 +17,147 @@ const AvatarSelectionModal: React.FC<AvatarSelectionModalProps> = ({ currentAvat
     };
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-content w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-gray-800">Choose Your Avatar</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <XIcon />
-                    </button>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-4 py-4">
-                    {Object.values(AVATARS).map(avatar => {
-                        const isSelected = selectedId === avatar.id;
-                        return (
-                            <div key={avatar.id} className="flex flex-col items-center" onClick={() => setSelectedId(avatar.id)}>
-                                <button className={`w-20 h-20 rounded-full transition-all duration-200 ${isSelected ? 'ring-4 ring-emerald-500' : 'hover:scale-105'}`}>
-                                    <avatar.icon className="w-full h-full" />
-                                </button>
-                                <p className={`mt-2 text-sm font-semibold ${isSelected ? 'text-emerald-600' : 'text-gray-600'}`}>{avatar.name}</p>
-                            </div>
-                        );
-                    })}
-                </div>
-                <div className="mt-6 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">
-                        Cancel
-                    </button>
-                    <button onClick={handleSave} className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
-                        Save Avatar
-                    </button>
-                </div>
-            </div>
-        </div>
+        <Modal
+            visible={true}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            <TouchableOpacity 
+                style={styles.overlay} 
+                activeOpacity={1} 
+                onPress={onClose}
+            >
+                <View style={styles.content} onStartShouldSetResponder={() => true}>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>Choose Your Avatar</Text>
+                        <TouchableOpacity onPress={onClose}>
+                            <XIcon width={24} height={24} color="#6b7280" />
+                        </TouchableOpacity>
+                    </View>
+                    <View style={styles.grid}>
+                        {Object.values(AVATARS).map(avatar => {
+                            const isSelected = selectedId === avatar.id;
+                            const AvatarIcon = avatar.icon;
+                            return (
+                                <TouchableOpacity
+                                    key={avatar.id}
+                                    onPress={() => setSelectedId(avatar.id)}
+                                    style={styles.avatarItem}
+                                >
+                                    <View style={[styles.avatarButton, isSelected && styles.avatarButtonSelected]}>
+                                        <AvatarIcon width={80} height={80} />
+                                    </View>
+                                    <Text style={[styles.avatarName, isSelected && styles.avatarNameSelected]}>
+                                        {avatar.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                    <View style={styles.actions}>
+                        <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
+                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={handleSave} style={styles.saveButton}>
+                            <Text style={styles.saveButtonText}>Save Avatar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        </Modal>
     );
 };
+
+const styles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    content: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        width: '100%',
+        maxWidth: 400,
+        padding: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    title: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    grid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        paddingVertical: 16,
+        gap: 16,
+    },
+    avatarItem: {
+        alignItems: 'center',
+        width: '22%',
+    },
+    avatarButton: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        overflow: 'hidden',
+    },
+    avatarButtonSelected: {
+        borderWidth: 4,
+        borderColor: '#059669',
+    },
+    avatarName: {
+        marginTop: 8,
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#6b7280',
+    },
+    avatarNameSelected: {
+        color: '#059669',
+    },
+    actions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 12,
+        marginTop: 24,
+    },
+    cancelButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#e5e7eb',
+        borderRadius: 8,
+    },
+    cancelButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151',
+    },
+    saveButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#059669',
+        borderRadius: 8,
+    },
+    saveButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#ffffff',
+    },
+});
 
 export default AvatarSelectionModal;

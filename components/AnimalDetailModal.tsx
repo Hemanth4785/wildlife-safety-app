@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, Text, Modal, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import type { AnimalPrediction } from '../types';
 import { XIcon } from './icons';
 
@@ -7,77 +8,236 @@ interface AnimalDetailModalProps {
     onClose: () => void;
 }
 
-const AnimalDetailModal: React.FC<AnimalDetailModalProps> = ({ animal, onClose }) => {
+const AnimalDetailModal: React.FC<AnimalDetailModalProps> = ({ animal, onClose }: AnimalDetailModalProps) => {
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="flex justify-between items-start pb-4 border-b border-gray-200">
-                    <div className="flex items-center gap-4">
-                        <span className="text-4xl">{animal.emoji}</span>
-                        <div>
-                            <h2 className="text-2xl font-bold text-gray-900">{animal.common}</h2>
-                            <p className="text-sm text-gray-500 italic -mt-1">{animal.scientific}</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 -mt-2 -mr-2">
-                        <XIcon className="w-6 h-6" />
-                    </button>
-                </div>
-                
-                {/* Scrollable Content Area */}
-                <div className="pt-5 space-y-6 max-h-[60vh] overflow-y-auto pr-2 -mr-4">
-                    {/* Image */}
-                    {animal.image && (
-                         <img src={animal.image} alt={animal.common} className="w-full h-48 object-cover rounded-lg shadow-md" />
-                    )}
-
-                    {/* Current Location Section */}
-                    <div>
-                        <h3 className="text-md font-semibold text-gray-800 mb-2">Current Sighting</h3>
-                        <div className="text-sm bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-3">
-                            <div>
-                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wider">Location</p>
-                                <p className="text-gray-800 leading-relaxed mt-1">{animal.current.addr}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wider">Distance</p>
-                                <p className="text-gray-800 mt-1">{animal.current.dist_km} km from you</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Predicted Path Section */}
-                    <div>
-                        <h3 className="text-md font-semibold text-gray-800 mb-2">Predicted Path</h3>
-                        {animal.preds.length > 0 ? (
-                            <div className="border border-gray-200 rounded-lg">
-                                <ul className="divide-y divide-gray-200">
-                                    {animal.preds.map((pred, index) => (
-                                        <li key={index} className="p-4 flex items-start gap-4">
-                                            <div className="flex-shrink-0 h-8 w-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow">
-                                                {index + 1}
-                                            </div>
-                                            <div className="text-sm flex-grow">
-                                                <p className="font-semibold text-gray-800">Next Location #{index + 1}</p>
-                                                <p className="text-gray-600 leading-relaxed mt-1">
-                                                    {pred.addr ? pred.addr : `Lat: ${pred.lat.toFixed(4)}, Lon: ${pred.lon.toFixed(4)}`}
-                                                </p>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        ) : (
-                            <div className="text-center text-sm text-gray-500 py-4 bg-gray-50 rounded-lg border border-gray-200">
-                                <p>No specific movement prediction available.</p>
-                            </div>
+        <Modal
+            visible={true}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            <TouchableOpacity 
+                style={styles.overlay} 
+                activeOpacity={1} 
+                onPress={onClose}
+            >
+                <View style={styles.content} onStartShouldSetResponder={() => true}>
+                    <View style={styles.header}>
+                        <View style={styles.headerLeft}>
+                            <Text style={styles.emoji}>{animal.emoji}</Text>
+                            <View>
+                                <Text style={styles.title}>{animal.common}</Text>
+                                <Text style={styles.scientific}>{animal.scientific}</Text>
+                            </View>
+                        </View>
+                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                            <XIcon width={24} height={24} color="#6b7280" />
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <ScrollView style={styles.scrollContent} contentContainerStyle={styles.scrollContentContainer}>
+                        {animal.image && (
+                            <Image 
+                                source={{ uri: animal.image }} 
+                                style={styles.image}
+                                resizeMode="cover"
+                            />
                         )}
-                    </div>
-                </div>
-            </div>
-        </div>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Current Sighting</Text>
+                            <View style={styles.infoBox}>
+                                <View style={styles.infoItem}>
+                                    <Text style={styles.infoLabel}>Location</Text>
+                                    <Text style={styles.infoValue}>{animal.current.addr || 'Unknown location'}</Text>
+                                </View>
+                                <View style={styles.infoItem}>
+                                    <Text style={styles.infoLabel}>Distance</Text>
+                                    <Text style={styles.infoValue}>{animal.current.dist_km} km from you</Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Predicted Path</Text>
+                            {animal.preds.length > 0 ? (
+                                <View style={styles.predictionsList}>
+                                    {animal.preds.map((pred, index) => (
+                                        <View key={index} style={styles.predictionItem}>
+                                            <View style={styles.predictionNumber}>
+                                                <Text style={styles.predictionNumberText}>{index + 1}</Text>
+                                            </View>
+                                            <View style={styles.predictionContent}>
+                                                <Text style={styles.predictionTitle}>Next Location #{index + 1}</Text>
+                                                <Text style={styles.predictionAddress}>
+                                                    {pred.addr ? pred.addr : `Lat: ${pred.lat.toFixed(4)}, Lon: ${pred.lon.toFixed(4)}`}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    ))}
+                                </View>
+                            ) : (
+                                <View style={styles.emptyPredictions}>
+                                    <Text style={styles.emptyText}>No specific movement prediction available.</Text>
+                                </View>
+                            )}
+                        </View>
+                    </ScrollView>
+                </View>
+            </TouchableOpacity>
+        </Modal>
     );
 };
+
+const styles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    content: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        width: '100%',
+        maxWidth: 500,
+        maxHeight: '80%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        flex: 1,
+    },
+    emoji: {
+        fontSize: 48,
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    scientific: {
+        fontSize: 14,
+        color: '#6b7280',
+        fontStyle: 'italic',
+        marginTop: -4,
+    },
+    closeButton: {
+        padding: 4,
+    },
+    scrollContent: {
+        flex: 1,
+    },
+    scrollContentContainer: {
+        padding: 20,
+        paddingBottom: 32,
+    },
+    image: {
+        width: '100%',
+        height: 192,
+        borderRadius: 8,
+        marginBottom: 24,
+    },
+    section: {
+        marginBottom: 24,
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111827',
+        marginBottom: 8,
+    },
+    infoBox: {
+        backgroundColor: '#f9fafb',
+        padding: 16,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        gap: 12,
+    },
+    infoItem: {
+        gap: 4,
+    },
+    infoLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#6b7280',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    infoValue: {
+        fontSize: 14,
+        color: '#111827',
+        lineHeight: 20,
+    },
+    predictionsList: {
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        borderRadius: 8,
+    },
+    predictionItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        padding: 16,
+        gap: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+    },
+    predictionNumber: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#059669',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    predictionNumberText: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#ffffff',
+    },
+    predictionContent: {
+        flex: 1,
+    },
+    predictionTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    predictionAddress: {
+        fontSize: 14,
+        color: '#6b7280',
+        lineHeight: 20,
+    },
+    emptyPredictions: {
+        padding: 16,
+        backgroundColor: '#f9fafb',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        alignItems: 'center',
+    },
+    emptyText: {
+        fontSize: 14,
+        color: '#6b7280',
+        textAlign: 'center',
+    },
+});
 
 export default AnimalDetailModal;

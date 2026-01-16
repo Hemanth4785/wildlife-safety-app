@@ -1,110 +1,228 @@
 import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { ShieldIcon } from './icons';
 
 interface LoginViewProps {
-    onAuth: (mode: 'login' | 'signup', name: string, email: string, pass: string) => string | null;
+    onAuth: (mode: 'login' | 'signup', name: string, email: string, pass: string) => Promise<string | null>;
 }
 
-const LoginView: React.FC<LoginViewProps> = ({ onAuth }) => {
+const LoginView: React.FC<LoginViewProps> = ({ onAuth }: LoginViewProps) => {
     const [mode, setMode] = useState<'login' | 'signup'>('login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('explorer@wildlife-safety.com');
     const [password, setPassword] = useState('password');
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleSubmit = async () => {
         setError('');
-        const result = onAuth(mode, name, email, password);
-        if (result) {
-            setError(result);
+        setIsLoading(true);
+        try {
+            const result = await onAuth(mode, name, email, password);
+            if (result) {
+                setError(result);
+            }
+        } catch (err) {
+            setError('An error occurred. Please try again.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
     const toggleMode = () => {
         setError('');
-        setMode(prev => prev === 'login' ? 'signup' : 'login');
-    }
+        setMode((prev: 'login' | 'signup') => prev === 'login' ? 'signup' : 'login');
+    };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-gray-50">
-            <div className="w-full max-w-md p-8 space-y-8 bg-white shadow-lg rounded-xl">
-                <div className="text-center">
-                    <ShieldIcon className="w-12 h-12 mx-auto text-emerald-600" />
-                    <h1 className="mt-4 text-3xl font-bold text-gray-900">
-                        {mode === 'login' ? 'Welcome Back' : 'Create Account'}
-                    </h1>
-                    <p className="mt-2 text-sm text-gray-600">
-                        {mode === 'login' ? 'Sign in to continue to Wildlife Safety' : 'Join to start your safety journey'}
-                    </p>
-                </div>
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    <div className="rounded-md shadow-sm space-y-3">
-                        {mode === 'signup' && (
-                             <div>
-                                <input
-                                    id="full-name"
-                                    name="name"
-                                    type="text"
-                                    required
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
-                                    placeholder="Full Name"
-                                />
-                            </div>
-                        )}
-                        <div>
-                            <input
-                                id="email-address"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
-                                placeholder="Email address"
-                            />
-                        </div>
-                        <div>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                autoComplete="current-password"
-                                required
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
-                                placeholder="Password"
-                            />
-                        </div>
-                    </div>
+        <KeyboardAvoidingView 
+            style={styles.container} 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+            <ScrollView 
+                contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled"
+            >
+                <View style={styles.card}>
+                    <View style={styles.header}>
+                        <ShieldIcon width={48} height={48} color="#059669" />
+                        <Text style={styles.title}>
+                            {mode === 'login' ? 'Welcome Back' : 'Create Account'}
+                        </Text>
+                        <Text style={styles.subtitle}>
+                            {mode === 'login' ? 'Sign in to continue to Wildlife Safety' : 'Join to start your safety journey'}
+                        </Text>
+                    </View>
                     
-                    {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+                    <View style={styles.form}>
+                        {mode === 'signup' && (
+                            <View style={styles.inputContainer}>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Full Name"
+                                    value={name}
+                                    onChangeText={setName}
+                                    autoCapitalize="words"
+                                />
+                            </View>
+                        )}
+                        <View style={styles.inputContainer}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Email address"
+                                value={email}
+                                onChangeText={setEmail}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoComplete="email"
+                            />
+                        </View>
+                        <View style={styles.inputContainer}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Password"
+                                value={password}
+                                onChangeText={setPassword}
+                                secureTextEntry
+                                autoComplete={mode === 'login' ? 'password' : 'password-new'}
+                            />
+                        </View>
+                        
+                        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-                    <div>
-                        <button
-                            type="submit"
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+                        <TouchableOpacity
+                            style={[styles.button, isLoading && styles.buttonDisabled]}
+                            onPress={handleSubmit}
+                            disabled={isLoading}
                         >
-                            {mode === 'login' ? 'Sign in' : 'Create Account'}
-                        </button>
-                    </div>
-                </form>
-                <p className="text-center text-sm text-gray-600">
-                    {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
-                    <button onClick={toggleMode} className="font-medium text-emerald-600 hover:text-emerald-500 ml-1">
-                        {mode === 'login' ? 'Sign up' : 'Sign in'}
-                    </button>
-                </p>
-                <p className="text-center text-xs text-gray-500 px-4">
-                    For Demo: Use email <strong>explorer@wildlife-safety.com</strong> and password <strong>password</strong> to sign in.
-                </p>
-            </div>
-        </div>
+                            <Text style={styles.buttonText}>
+                                {isLoading ? 'Loading...' : mode === 'login' ? 'Sign in' : 'Create Account'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <View style={styles.footer}>
+                        <Text style={styles.footerText}>
+                            {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                        </Text>
+                        <TouchableOpacity onPress={toggleMode}>
+                            <Text style={styles.footerLink}>
+                                {mode === 'login' ? 'Sign up' : 'Sign in'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={styles.demoText}>
+                        For Demo: Use email <Text style={styles.demoBold}>explorer@wildlife-safety.com</Text> and password <Text style={styles.demoBold}>password</Text> to sign in.
+                    </Text>
+                </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 };
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f9fafb',
+    },
+    scrollContent: {
+        flexGrow: 1,
+        justifyContent: 'center',
+        padding: 16,
+    },
+    card: {
+        width: '100%',
+        maxWidth: 400,
+        alignSelf: 'center',
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        padding: 32,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    header: {
+        alignItems: 'center',
+        marginBottom: 32,
+    },
+    title: {
+        marginTop: 16,
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    subtitle: {
+        marginTop: 8,
+        fontSize: 14,
+        color: '#6b7280',
+        textAlign: 'center',
+    },
+    form: {
+        marginTop: 8,
+    },
+    inputContainer: {
+        marginBottom: 12,
+    },
+    input: {
+        width: '100%',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        borderRadius: 6,
+        fontSize: 14,
+        color: '#111827',
+        backgroundColor: '#ffffff',
+    },
+    button: {
+        width: '100%',
+        paddingVertical: 12,
+        backgroundColor: '#059669',
+        borderRadius: 6,
+        alignItems: 'center',
+        marginTop: 8,
+    },
+    buttonDisabled: {
+        opacity: 0.6,
+    },
+    buttonText: {
+        color: '#ffffff',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    error: {
+        fontSize: 14,
+        color: '#dc2626',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    footer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginTop: 16,
+    },
+    footerText: {
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    footerLink: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#059669',
+    },
+    demoText: {
+        marginTop: 16,
+        fontSize: 12,
+        color: '#9ca3af',
+        textAlign: 'center',
+        paddingHorizontal: 16,
+    },
+    demoBold: {
+        fontWeight: 'bold',
+    },
+});
 
 export default LoginView;
