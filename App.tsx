@@ -23,7 +23,8 @@ const AppContent: React.FC = () => {
         safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
-        weather, isApproachingStart
+        weather, isApproachingStart,
+        backendReady, backendError
     } = useAnimalData();
     
     const { 
@@ -75,8 +76,12 @@ const AppContent: React.FC = () => {
         setCurrentView(view);
     };
 
-    if (isLoading) {
+    if (isLoading || backendReady === null) {
         return <LoadingScreen message="Initializing app..." />;
+    }
+
+    if (backendReady === false) {
+        return <LoadingScreen message={backendError || "Backend is not reachable. Please start the backend server and try again."} />;
     }
 
     if (!user) return <LoginView onAuth={handleAuth} />;

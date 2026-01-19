@@ -1,6 +1,9 @@
-import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
+import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode, SafeRouteResponse } from '../types';
 import { logger } from '../utils/logger';
 import { retry } from '../utils/retry';
+import axios from 'axios';
+import Constants from 'expo-constants';
+import { Alert } from 'react-native';
 
 // Native-safe fetch implementation (no CORS proxy needed)
 const nativeFetch = async (url: string, options: RequestInit = {}): Promise<any> => {
@@ -103,148 +106,214 @@ export const getRainViewerTimestamps = async (): Promise<any> => {
     }
 };
 
-export const searchLocations = async (query: string): Promise<Location[]> => {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`;
-    const headers = { 'User-Agent': 'WildlifeSafetyApp/1.0 (React Native)' };
+export const checkBackendHealth = async (): Promise<boolean> => {
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL as string | undefined;
+    if (!baseUrl) {
+        logger.error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+        return false;
+    }
+    const url = `${baseUrl}/test`;
     try {
-        const data = await nativeFetch(url, { method: 'GET', headers });
+        const data = await nativeFetch(url);
+        return !!data && data.ok === true;
+    } catch (error) {
+        logger.error('Backend health check failed', error);
+        return false;
+    }
+};
+
+export const searchLocations = async (query: string): Promise<Location[]> => {
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL as string | undefined;
+
+    if (!baseUrl) {
+        throw new Error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+    }
+
+    const url = `${baseUrl}/api/search-locations?q=${encodeURIComponent(query)}`;
+
+    try {
+        const data = await nativeFetch(url);
         if (!Array.isArray(data)) {
-            logger.error("Unexpected response format from location search", data);
+            logger.error("Unexpected response format from location search proxy", data);
             return [];
         }
         return data.map((item: any) => ({ lat: parseFloat(item.lat), lon: parseFloat(item.lon), name: item.display_name }));
     } catch (error) {
-        logger.error("Failed to search locations", error);
+        logger.error("Failed to search locations via backend", error);
         return [];
     }
 };
 
 export const reverseGeocode = async (lat: number, lon: number): Promise<string> => {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
-    const headers = { 'User-Agent': 'WildlifeSafetyApp/1.0 (React Native)' };
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL as string | undefined;
+
+    if (!baseUrl) {
+        throw new Error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+    }
+
+    const url = `${baseUrl}/api/reverse-geocode?lat=${lat}&lon=${lon}`;
+
     try {
-        const data = await nativeFetch(url, { method: 'GET', headers });
+        const data = await nativeFetch(url);
         if (data && data.error) {
-            logger.warn(`Reverse geocode error from API: ${data.error}`);
+            logger.warn(`Reverse geocode error from backend proxy: ${data.error}`);
             return 'Address not found';
         }
         return data?.display_name || 'Unknown location';
     } catch (error: any) {
-        logger.error("Failed to reverse geocode", error);
+        logger.error("Failed to reverse geocode via backend", error);
         return 'Address not found';
     }
 };
 
 export const getAnimalSightings = async (scientificName: string, location: Location, radiusKm: number): Promise<Sighting[]> => {
-    const decimalLatitude = `${location.lat - (radiusKm / 111.32)},${location.lat + (radiusKm / 111.32)}`;
-    const decimalLongitude = `${location.lon - (radiusKm / (111.32 * Math.cos(location.lat * Math.PI / 180)))},${location.lon + (radiusKm / (111.32 * Math.cos(location.lat * Math.PI / 180)))}`;
-    const taxonKeyUrl = `https://api.gbif.org/v1/species/match?name=${encodeURIComponent(scientificName)}`;
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL;
+
+    if (!baseUrl) {
+        logger.error('API_BASE_URL is not configured');
+        return [];
+    }
+
     try {
-        logger.debug(`Fetching taxon key for ${scientificName}`);
-        const taxonData = await nativeFetch(taxonKeyUrl);
-        const taxonKey = taxonData?.usageKey;
-        if (!taxonKey) {
-            logger.warn(`No taxon key found for ${scientificName}`);
+        logger.debug(`Fetching sightings for ${scientificName} via backend`);
+        const response = await axios.get(`${baseUrl}/api/sightings`, {
+            params: {
+                scientificName,
+                lat: location.lat,
+                lon: location.lon,
+                radius: radiusKm
+            },
+            timeout: 20000 // 20s timeout
+        });
+
+        if (Array.isArray(response.data)) {
+            return response.data;
+        } else {
+            logger.warn('Unexpected response format from backend sightings API');
             return [];
         }
-        const sightingsUrl = `https://api.gbif.org/v1/occurrence/search?taxon_key=${taxonKey}&decimalLatitude=${decimalLatitude}&decimalLongitude=${decimalLongitude}&limit=200&hasCoordinate=true&hasGeospatialIssue=false`;
-        logger.debug(`Fetching sightings for taxon key ${taxonKey}`);
-        const sightingsData = await nativeFetch(sightingsUrl);
-        const sightings = sightingsData.results.map((occ: any) => ({
-            lat: occ.decimalLatitude,
-            lon: occ.decimalLongitude,
-            image: occ.media?.find((m: any) => m.type === 'StillImage')?.identifier
-        }));
-        return sightings.filter((s: Sighting) => s.lat && s.lon);
+
     } catch (error: any) {
         logger.error(`Failed to get sightings for ${scientificName}`, error);
+        // Return empty array instead of throwing, so the app doesn't crash
         return [];
     }
 };
 
 export const predictAnimalPaths = async (sightingSets: { scientificName: string, sightings: Sighting[] }[]): Promise<{ scientificName: string, predictions: { lat: number, lon: number }[] }[]> => {
-    // Native implementation: return empty array gracefully
-    // AI features are not available on mobile yet - return empty predictions
-    console.warn('AI prediction is not available on mobile. Returning empty predictions.');
-    return [];
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL as string | undefined;
+
+    if (!baseUrl) {
+        throw new Error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+    }
+
+    const endpoint = `${baseUrl}/api/predict-animal-paths`;
+
+    try {
+        // Process each sighting set separately
+        const results = await Promise.all(
+            sightingSets.map(async ({ scientificName, sightings }) => {
+                if (sightings.length === 0) {
+                    return { scientificName, predictions: [] };
+                }
+
+                // Transform sightings to backend format: { lat, lon } -> { lat, lng }
+                const animalSightings = sightings.map(sighting => ({
+                    lat: sighting.lat,
+                    lng: sighting.lon
+                }));
+
+                const response = await axios.post(endpoint, {
+                    animalSightings,
+                    scientificName // Add scientificName to payload for validation/logging
+                }, {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000 // 30 second timeout
+                });
+
+                if (!response.data || !response.data.success) {
+                    logger.warn(`Backend prediction failed for ${scientificName}`, response.data);
+                    return { scientificName, predictions: [] };
+                }
+
+                // Transform response: { lat, lng, risk } -> { lat, lon }
+                const predictions = (response.data.predictedZones || []).map((zone: any) => ({
+                    lat: zone.lat,
+                    lon: zone.lng
+                }));
+
+                return { scientificName, predictions };
+            })
+        );
+
+        return results;
+    } catch (error: any) {
+        logger.error('Failed to predict animal paths', error);
+        if (error.response) {
+            throw new Error(`Backend API error: ${error.response.status} - ${error.response.data?.message || 'Unknown error'}`);
+        } else if (error.request) {
+            throw new Error('Failed to connect to backend API. Please check your network connection and API_BASE_URL configuration.');
+        } else {
+            throw new Error(`Failed to predict animal paths: ${error.message}`);
+        }
+    }
 };
 
 export const getAIGuideResponse = async (history: ChatMessage[]): Promise<string> => {
-    // Native implementation: return user-friendly fallback message
     return "AI features are not available on mobile yet. Please use the web version of the app for AI-powered wildlife safety guidance. For now, stay alert, avoid known wildlife areas during active hours, and always inform someone of your route.";
 };
 
-const decodePolyline = (encoded: string): [number, number][] => {
-    const len = encoded.length;
-    let index = 0;
-    const array: [number, number][] = [];
-    let lat = 0;
-    let lng = 0;
-    while (index < len) {
-        let b;
-        let shift = 0;
-        let result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lat += dlat;
-        shift = 0;
-        result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lng += dlng;
-        array.push([lat * 1e-6, lng * 1e-6]);
+export const getSafeNavigationRoute = async (start: Location, end: Location, mode: TravelMode): Promise<Route | null> => {
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL as string | undefined;
+
+    if (!baseUrl) {
+        logger.error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+        Alert.alert('Error', 'Safe routing temporarily unavailable');
+        return null;
     }
-    return array;
-};
 
-export const getSafeNavigationRoute = async (start: Location, end: Location, avoidPolygons: number[][][], mode: TravelMode): Promise<Route | null> => {
-    const url = 'https://valhalla1.openstreetmap.de/route';
-    const multiPolygonCoordinates = avoidPolygons.map(polygonRing => [polygonRing]);
-    
-    const costingMap: Record<TravelMode, string> = {
-        car: 'auto',
-        bike: 'bicycle',
-        bus: 'bus',
-        walk: 'pedestrian'
-    };
-    const costing = costingMap[mode];
+    // Map TravelMode to ORS profiles
+    const orsMode = mode === 'walk' ? 'foot-walking' : 'driving-car';
 
-    const requestBody = {
-        locations: [{ lat: start.lat, lon: start.lon }, { lat: end.lat, lon: end.lon }],
-        costing: costing,
-        ...(multiPolygonCoordinates.length > 0 && { avoid_polygons: { type: "MultiPolygon", coordinates: multiPolygonCoordinates } }),
-        directions_options: { units: "kilometers" }
-    };
     try {
-        const data = await nativeFetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
+        const response = await axios.post<SafeRouteResponse>(`${baseUrl}/api/safe-route`, {
+            start,
+            end,
+            travelMode: orsMode
+        }, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
         });
-        if (data && data.trip) {
-            const leg = data.trip.legs[0];
-            const shape = data.trip.legs.flatMap((l: any) => decodePolyline(l.shape));
-            return {
-                path: shape,
-                distanceKm: parseFloat(leg.summary.length.toFixed(1)),
-                durationMinutes: Math.round(leg.summary.time / 60),
-                start: start,
-                end: end,
-                mode: mode
-            };
-        } else {
-            throw new Error("Invalid route data received from Valhalla API.");
+
+        const data = response.data;
+
+        if (!data.success || !data.geometry || !data.geometry.coordinates) {
+             Alert.alert('Error', 'Safe routing temporarily unavailable');
+             return null;
         }
-    } catch (error: any) {
-        logger.error("Failed to fetch safe navigation route", error);
-        throw new Error(error.message || "Failed to fetch safe navigation route.");
+
+        if (data.provider === 'fallback' || data.warning) {
+             Alert.alert('Route Warning', 'Approximate route shown (routing service unavailable)');
+        }
+
+        // ORS returns [lon, lat], swap to [lat, lon] for Leaflet/app usage
+        const path: [number, number][] = data.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+
+        return {
+            path,
+            distanceKm: data.distance || 0,
+            durationMinutes: data.duration || 0,
+            start,
+            end,
+            mode,
+        };
+    } catch (error) {
+        logger.error('Failed to fetch safe navigation route from backend', error);
+        Alert.alert('Error', 'Safe routing temporarily unavailable');
+        return null;
     }
 };

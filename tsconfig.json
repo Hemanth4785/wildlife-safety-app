@@ -10,6 +10,7 @@
     /* Critical fix: override Expo's invalid setting */
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "moduleSuffixes": [".native", ".web", ""],
 
     /* Interop */
     "resolveJsonModule": true,
@@ -24,14 +25,6 @@
     "paths": {
       "@/*": ["./*"]
     },
-
-    /* Explicit global types */
-    "types": [
-      "node",
-      "react",
-      "react-native",
-      "jest"
-    ],
 
     /* Sanity */
     "skipLibCheck": true,
