@@ -6,7 +6,7 @@ import * as geo from '../services/geoService';
 import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS } from '../constants';
 import { storage } from '../utils/storage';
 import { logger } from '../utils/logger';
-import * as Location from 'expo-location';
+import * as ExpoLocation from 'expo-location';
 
 const useLocalStorage = <T,>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] => {
     const [storedValue, setStoredValue] = useState<T>(initialValue);
@@ -59,6 +59,8 @@ export const useAnimalData = () => {
     const [routeMessage, setRouteMessage] = useState('');
     const [weather, setWeather] = useState<WeatherData | null>(null);
     const isPredictingRef = useRef(false);
+    const [backendReady, setBackendReady] = useState<boolean | null>(null);
+    const [backendError, setBackendError] = useState<string | null>(null);
 
     // --- State for Live Navigation ---
     const [isNavigating, setIsNavigating] = useState(false);
@@ -68,7 +70,7 @@ export const useAnimalData = () => {
     const [closestPathIndex, setClosestPathIndex] = useState(0);
     const [isApproachingStart, setIsApproachingStart] = useState(false);
     const isApproachingStartRef = useRef(false);
-    const watchSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+    const watchSubscriptionRef = useRef<ExpoLocation.LocationSubscription | null>(null);
     const lastRerouteTimestampRef = useRef<number>(0);
     const isNavigatingRef = useRef(isNavigating);
     useEffect(() => {
@@ -90,14 +92,14 @@ export const useAnimalData = () => {
 
         try {
             const animalSightingsPromises = Object.entries(ANIMALS).map(([scientificName, info]) =>
-                api.getAnimalSightings(scientificName, location, RADIUS_KM).then(sightings => ({
+                api.getAnimalSightings(scientificName, location, RADIUS_KM).then((sightings: Sighting[]) => ({
                     scientificName,
                     sightings: sightings.slice(0, SEQ_LEN)
                 }))
             );
 
-            const sightingSets = (await Promise.all(animalSightingsPromises))
-                .filter(set => set.sightings.length > 0);
+            const sightingSets: { scientificName: string; sightings: Sighting[] }[] = (await Promise.all(animalSightingsPromises))
+                .filter((set: { scientificName: string; sightings: Sighting[] }) => set.sightings.length > 0);
 
             if (sightingSets.length === 0) {
                 setStatus(AppState.SUCCESS);
@@ -117,9 +119,9 @@ export const useAnimalData = () => {
                 return [];
             }
 
-            const detailedPredictionsPromises = pathPredictions.map(async (predGroup) => {
+            const detailedPredictionsPromises = pathPredictions.map(async (predGroup: { scientificName: string; predictions: { lat: number; lon: number }[] }) => {
                 const { scientificName, predictions: pathPoints } = predGroup;
-                const sightingSet = sightingSets.find(s => s.scientificName === scientificName);
+                const sightingSet = sightingSets.find((s: { scientificName: string; sightings: Sighting[] }) => s.scientificName === scientificName);
                 if (!sightingSet || sightingSet.sightings.length === 0 || pathPoints.length === 0) return null;
 
                 const animalInfo = ANIMALS[scientificName];
@@ -130,7 +132,7 @@ export const useAnimalData = () => {
 
                 const waypoints: [number, number][] = [
                     [currentPoint.lat, currentPoint.lon],
-                    ...pathPoints.map(p => [p.lat, p.lon] as [number, number])
+                    ...pathPoints.map((p: { lat: number; lon: number }) => [p.lat, p.lon] as [number, number])
                 ];
 
                 const fullPath = geo.createSplinePath(waypoints, SMOOTH_STEPS);
@@ -220,24 +222,22 @@ export const useAnimalData = () => {
             }
     
             const searchCenter = geo.getMidpoint(startLoc, endLoc);
-            const relevantPredictions = isNavigatingRef.current
+            const relevantPredictions: AnimalPrediction[] = isNavigatingRef.current
                 ? predictionsRef.current
                 : await getPredictionsForArea(searchCenter);
-    
-            const avoidancePolygons = relevantPredictions
-                .filter(p => !excludedAnimalIds.includes(p.id))
-                .map(p => geo.createCirclePolygon([p.current.lat, p.current.lon], radius / 10)); // smaller avoidance for individual points
-    
-            const route = await api.getSafeNavigationRoute(startLoc, endLoc, avoidancePolygons, mode);
-            if (route) {
-                setSafeRoute(route);
+
+        const route = await api.getSafeNavigationRoute(startLoc, endLoc, mode);
+        if (route) {
+            setSafeRoute(route);
                 const places = await api.findSafePlacesAlongRoute(route.path);
                 setSafePlaces(places);
                 setRouteStatus(AppState.SUCCESS);
                 setRouteMessage('Safe route found!');
                 return route;
             } else {
-                throw new Error('Could not find a route.');
+                setRouteStatus(AppState.ERROR);
+                setRouteMessage('Safe route unavailable, try again');
+                return null;
             }
         } catch (error: any) {
             setRouteStatus(AppState.ERROR);
@@ -264,13 +264,17 @@ export const useAnimalData = () => {
     const clearSuggestions = useCallback(() => setSuggestions([]), []);
 
     const getCurrentLocation = useCallback(async (): Promise<Location> => {
+        const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+
+        if (status !== 'granted') {
+            const error: any = new Error('Location permission was denied');
+            error.code = 'LOCATION_PERMISSION_DENIED';
+            throw error;
+        }
+
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                throw new Error('Permission to access location was denied');
-            }
-            const position = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.High,
+            const position = await ExpoLocation.getCurrentPositionAsync({
+                accuracy: ExpoLocation.Accuracy.High,
             });
             const { latitude, longitude } = position.coords;
             const name = await api.reverseGeocode(latitude, longitude);
@@ -281,7 +285,26 @@ export const useAnimalData = () => {
         }
     }, []);
     
-    // Initial load effect
+    useEffect(() => {
+        const checkBackend = async () => {
+            try {
+                const ok = await api.checkBackendHealth();
+                if (!ok) {
+                    setBackendReady(false);
+                    setBackendError('Backend API is not reachable. Some features may be limited.');
+                } else {
+                    setBackendReady(true);
+                    setBackendError(null);
+                }
+            } catch (error) {
+                logger.error('Backend health check failed', error);
+                setBackendReady(false);
+                setBackendError('Backend API is not reachable. Some features may be limited.');
+            }
+        };
+        checkBackend();
+    }, []);
+
     useEffect(() => {
         const fetchInitialData = async () => {
             try {
@@ -341,20 +364,20 @@ export const useAnimalData = () => {
         }
 
         // Request permissions
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
             setNavigationAlert({ animal: null, message: 'Location permission denied. Please enable location services.' });
             setIsNavigating(false);
             return;
         }
 
-        watchSubscriptionRef.current = await Location.watchPositionAsync(
+        watchSubscriptionRef.current = await ExpoLocation.watchPositionAsync(
             {
-                accuracy: Location.Accuracy.High,
+                accuracy: ExpoLocation.Accuracy.High,
                 timeInterval: 1000,
                 distanceInterval: 10,
             },
-            async (position) => {
+            async (position: ExpoLocation.LocationObject) => {
                 // If we just recovered from a GPS error, clear the alert.
                 if (navigationAlertRef.current?.message.includes("Live location signal lost")) {
                     clearNavigationAlert();
@@ -422,19 +445,21 @@ export const useAnimalData = () => {
                         return;
                     }
                     
-                    // Check for proximity to animal paths
-                    let closestAnimal: { animal: AnimalPrediction; distKm: number } | null = null;
-                    predictionsRef.current.forEach(animal => {
+                    let closestAnimal: AnimalPrediction | null = null;
+                    let closestDistKm = Infinity;
+                    predictionsRef.current.forEach((animal: AnimalPrediction) => {
                         const { distanceToPathKm: distKm } = geo.getPathDataFromLocation(currentLiveLocation, animal.fullPath);
-                        if (distKm < (closestAnimal?.distKm ?? Infinity)) {
-                            closestAnimal = { animal, distKm };
+                        if (distKm < closestDistKm) {
+                            closestDistKm = distKm;
+                            closestAnimal = animal;
                         }
                     });
 
-                    if (closestAnimal && closestAnimal.distKm < PROXIMITY_ALERT_KM) {
+                    if (closestAnimal && closestDistKm < PROXIMITY_ALERT_KM) {
                         lastRerouteTimestampRef.current = now;
-                        setNavigationAlert({ animal: closestAnimal.animal, message: `Approaching ${closestAnimal.animal.common}! Rerouting to a safer path.` });
-                        await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode, [closestAnimal.animal.id]);
+                        const alertAnimal = closestAnimal;
+                        setNavigationAlert({ animal: alertAnimal, message: `Approaching ${alertAnimal.common}! Rerouting to a safer path.` });
+                        await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode, [alertAnimal.id]);
                         return;
                     }
                 }
@@ -452,6 +477,7 @@ export const useAnimalData = () => {
         safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
-        weather, isApproachingStart
+        weather, isApproachingStart,
+        backendReady, backendError
     };
 };

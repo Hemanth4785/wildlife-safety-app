@@ -5,7 +5,7 @@
 import React, { createContext, useContext, useCallback, useState, useEffect, ReactNode } from 'react';
 import { User, Report } from '../types';
 import { storage } from '../utils/storage';
-import { secureGetItem, secureSetItem, secureRemoveItem, hashPassword, verifyPassword } from '../utils/secureStorage';
+import { secureSetItem, secureRemoveItem } from '../utils/secureStorage';
 import { logger } from '../utils/logger';
 import { NEARBY_KM } from '../constants';
 
@@ -50,35 +50,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [reports, setReports] = useState<Report[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [usersDB, setUsersDB] = useState<Record<string, string>>({}); // email -> password hash
 
   // Initialize app data
   const initializeApp = useCallback(async () => {
     try {
       setIsLoading(true);
-      
-      // Load users database (email -> password hash)
-      const savedUsers = await storage.getItem<Record<string, string>>('wildlife-app-users');
-      if (savedUsers) {
-        setUsersDB(savedUsers);
-      } else {
-        // Create default user with hashed password
-        const defaultEmail = 'explorer@wildlife-safety.com';
-        const defaultPassword = 'password';
-        const defaultPasswordHash = hashPassword(defaultPassword);
-        const defaultUser: User = {
-          email: defaultEmail,
-          name: 'Trail Explorer',
-          avatarId: 'tiger',
-          nearbyRadiusKm: NEARBY_KM,
-          isNewUser: true,
-        };
-        
-        const defaultDB = { [defaultEmail]: defaultPasswordHash };
-        await storage.setItem('wildlife-app-users', defaultDB);
-        await storage.setItem(`user-${defaultEmail}`, defaultUser);
-        setUsersDB(defaultDB);
-      }
 
       // Load saved session
       const savedSession = await storage.getItem<User>('wildlife-app-session');
@@ -113,18 +89,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const login = useCallback(async (email: string, password: string): Promise<string | null> => {
     try {
       const normalizedEmail = email.toLowerCase();
-      const passwordHash = usersDB[normalizedEmail];
-      
-      if (!passwordHash) {
-        return 'Invalid credentials. Please try again.';
-      }
-
-      // Verify password
-      if (!verifyPassword(password, passwordHash)) {
-        return 'Invalid credentials. Please try again.';
-      }
-
-      // Load user data
       const userData = await storage.getItem<User>(`user-${normalizedEmail}`);
       if (!userData) {
         return 'Could not find user data. Please sign up again.';
@@ -136,6 +100,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       setUser(userData);
       await storage.setItem('wildlife-app-session', userData);
+      await secureSetItem('session-user', normalizedEmail);
       
       if (userData.isNewUser) {
         setShowOnboarding(true);
@@ -146,19 +111,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       logger.error('Login error', error);
       return 'An error occurred during login. Please try again.';
     }
-  }, [usersDB]);
+  }, []);
 
   // Sign up new user
   const signup = useCallback(async (name: string, email: string, password: string): Promise<string | null> => {
     try {
       const normalizedEmail = email.toLowerCase();
-      
-      if (usersDB[normalizedEmail]) {
+
+      const existingUser = await storage.getItem<User>(`user-${normalizedEmail}`);
+      if (existingUser) {
         return 'An account with this email already exists.';
       }
 
-      // Hash password before storing
-      const passwordHash = hashPassword(password);
       const newUser: User = {
         name,
         email: normalizedEmail,
@@ -167,15 +131,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         isNewUser: true,
       };
 
-      // Update users database
-      const newDB = { ...usersDB, [normalizedEmail]: passwordHash };
-      setUsersDB(newDB);
-      await storage.setItem('wildlife-app-users', newDB);
       await storage.setItem(`user-${normalizedEmail}`, newUser);
 
       // Set as current user
       setUser(newUser);
       await storage.setItem('wildlife-app-session', newUser);
+      await secureSetItem('session-user', normalizedEmail);
       setShowOnboarding(true);
 
       return null;
@@ -183,13 +144,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       logger.error('Signup error', error);
       return 'An error occurred during signup. Please try again.';
     }
-  }, [usersDB]);
+  }, []);
 
   // Logout user
   const logout = useCallback(async () => {
     try {
       setUser(null);
       await storage.removeItem('wildlife-app-session');
+       await secureRemoveItem('session-user');
     } catch (error) {
       logger.error('Logout error', error);
     }

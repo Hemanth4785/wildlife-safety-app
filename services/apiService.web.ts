@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai/web";
 import Constants from 'expo-constants';
-import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
+import axios from 'axios';
+import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode, SafeRouteResponse } from '../types';
 import { GBIF_LIMIT } from '../constants';
 import { logger } from '../utils/logger';
 
@@ -8,6 +9,15 @@ import { logger } from '../utils/logger';
 const apiKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY
     ? import.meta.env.VITE_GEMINI_API_KEY
     : Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
+
+const getApiBaseUrl = () => {
+    const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL;
+    if (!baseUrl) {
+        logger.error("API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.");
+        return 'http://localhost:3000';
+    }
+    return baseUrl as string;
+};
 
 if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set VITE_GEMINI_API_KEY in .env.local for Vite builds, or configure it in app.config.js under expo.extra.GEMINI_API_KEY for Expo builds.');
@@ -145,42 +155,94 @@ export const getRainViewerTimestamps = async (): Promise<any> => {
     }
 };
 
-export const searchLocations = async (query: string): Promise<Location[]> => {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`;
-    const headers = { 'User-Agent': 'WildlifeSafetyApp/1.0 (for aistudio.google.com)' };
+export const checkBackendHealth = async (): Promise<boolean> => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/test`;
     try {
-        const data = await fetchWithProxyFallbacks(url, { method: 'GET', headers });
-        if (!Array.isArray(data)) { logger.error("Unexpected response format from location search proxy", data); return []; }
-        return data.map((item: any) => ({ lat: parseFloat(item.lat), lon: parseFloat(item.lon), name: item.display_name }));
-    } catch (error) { logger.error("Failed to search locations", error); return []; }
+        const response = await fetch(url);
+        if (!response.ok) {
+            return false;
+        }
+        const data = await response.json();
+        return !!data && data.ok === true;
+    } catch (error) {
+        logger.error('Backend health check failed', error);
+        return false;
+    }
+};
+
+export const searchLocations = async (query: string): Promise<Location[]> => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/search-locations?q=${encodeURIComponent(query)}`;
+
+    try {
+        const response = await axios.get(url);
+        const data = response.data;
+        if (!Array.isArray(data)) {
+            logger.error("Unexpected response format from location search proxy", data);
+            return [];
+        }
+        return data.map((item: any) => ({
+            lat: parseFloat(item.lat),
+            lon: parseFloat(item.lon),
+            name: item.display_name
+        }));
+    } catch (error) {
+        logger.error("Failed to search locations", error);
+        return [];
+    }
 };
 
 export const reverseGeocode = async (lat: number, lon: number): Promise<string> => {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
-    const headers = { 'User-Agent': 'WildlifeSafetyApp/1.0 (for aistudio.google.com)' };
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/reverse-geocode?lat=${lat}&lon=${lon}`;
+
     try {
-        const data = await fetchWithProxyFallbacks(url, { method: 'GET', headers });
-        if (data && data.error) { logger.warn(`Reverse geocode error from API: ${data.error}`); return 'Address not found'; }
-        // Added a check to prevent crash on undefined display_name
+        const response = await axios.get(url);
+        const data = response.data;
+        if (data && data.error) {
+            logger.warn(`Reverse geocode error from backend: ${data.error}`);
+            return 'Address not found';
+        }
         return data?.display_name || 'Unknown location';
-    } catch (error: any) { logger.error("Failed to reverse geocode", error); return 'Address not found'; }
+    } catch (error: any) {
+        logger.error("Failed to reverse geocode", error);
+        return 'Address not found';
+    }
 };
 
 export const getAnimalSightings = async (scientificName: string, location: Location, radiusKm: number): Promise<Sighting[]> => {
-    const decimalLatitude = `${location.lat - (radiusKm / 111.32)},${location.lat + (radiusKm / 111.32)}`;
-    const decimalLongitude = `${location.lon - (radiusKm / (111.32 * Math.cos(location.lat * Math.PI / 180)))},${location.lon + (radiusKm / (111.32 * Math.cos(location.lat * Math.PI / 180)))}`;
-    const taxonKeyUrl = `https://api.gbif.org/v1/species/match?name=${encodeURIComponent(scientificName)}`;
+    const baseUrl = getApiBaseUrl();
+
+    if (!baseUrl) {
+        logger.error('API_BASE_URL is not configured');
+        return [];
+    }
+
     try {
-        logger.debug(`Fetching taxon key for ${scientificName}`);
-        const taxonData = await fetchWithProxyFallbacks(taxonKeyUrl);
-        const taxonKey = taxonData?.usageKey;
-        if (!taxonKey) { logger.warn(`No taxon key found for ${scientificName}`); return []; }
-        const sightingsUrl = `https://api.gbif.org/v1/occurrence/search?taxon_key=${taxonKey}&decimalLatitude=${decimalLatitude}&decimalLongitude=${decimalLongitude}&limit=${GBIF_LIMIT}&hasCoordinate=true&hasGeospatialIssue=false`;
-        logger.debug(`Fetching sightings for taxon key ${taxonKey}`);
-        const sightingsData = await fetchWithProxyFallbacks(sightingsUrl);
-        const sightings = sightingsData.results.map((occ: any) => ({ lat: occ.decimalLatitude, lon: occ.decimalLongitude, image: occ.media?.find((m: any) => m.type === 'StillImage')?.identifier }));
-        return sightings.filter((s: Sighting) => s.lat && s.lon);
-    } catch (error: any) { logger.error(`Failed to get sightings for ${scientificName}`, error); return []; }
+        logger.debug(`Fetching sightings for ${scientificName} via backend`);
+        const response = await axios.get(`${baseUrl}/api/sightings`, {
+            params: {
+                scientificName,
+                lat: location.lat,
+                lon: location.lon,
+                radius: radiusKm
+            },
+            timeout: 20000 // 20s timeout
+        });
+
+        if (Array.isArray(response.data)) {
+            return response.data;
+        } else {
+            logger.warn('Unexpected response format from backend sightings API');
+            return [];
+        }
+
+    } catch (error: any) {
+        logger.error(`Failed to get sightings for ${scientificName}`, error);
+        // Return empty array instead of throwing, so the app doesn't crash
+        return [];
+    }
 };
 
 export const predictAnimalPaths = async (sightingSets: { scientificName: string, sightings: Sighting[] }[]): Promise<{ scientificName: string, predictions: { lat: number, lon: number }[] }[]> => {
@@ -188,54 +250,57 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
         return [];
     }
 
-    const prompt = `Based on the following sets of recent wildlife sightings, predict the next 3 likely locations for each animal's path. Each set is for a different animal, identified by its scientific name.
-Sightings: ${JSON.stringify(sightingSets)}.
-Provide the response as a single JSON array. Each element in the array should be an object with two keys: "scientificName" (the name of the animal) and "predictions" (an array of 3 predicted {lat, lon} locations for that animal's path). If there isn't enough data for a prediction, return an empty predictions array for that animal.`;
+    const baseUrl = getApiBaseUrl();
+    const endpoint = `${baseUrl}/api/predict-animal-paths`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            scientificName: {
-                                type: Type.STRING,
-                                description: "The scientific name of the animal, e.g., 'Panthera pardus'."
-                            },
-                            predictions: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        lat: {
-                                            type: Type.NUMBER,
-                                            description: "Latitude of the predicted point."
-                                        },
-                                        lon: {
-                                            type: Type.NUMBER,
-                                            description: "Longitude of the predicted point."
-                                        },
-                                    },
-                                    required: ["lat", "lon"],
-                                },
-                                description: "An array of 3 predicted {lat, lon} locations."
-                            }
+        // Process each sighting set separately to match native implementation and backend mock expectation
+        const results = await Promise.all(
+            sightingSets.map(async ({ scientificName, sightings }) => {
+                if (sightings.length === 0) {
+                    return { scientificName, predictions: [] };
+                }
+
+                // Transform sightings to backend format: { lat, lon } -> { lat, lng }
+                // The backend mock expects 'animalSightings' with { lat, lng } or { lat, lon }
+                const animalSightings = sightings.map(sighting => ({
+                    lat: sighting.lat,
+                    lng: sighting.lon
+                }));
+
+                try {
+                    const response = await axios.post(endpoint, {
+                        animalSightings,
+                        scientificName
+                    }, {
+                        headers: {
+                            'Content-Type': 'application/json'
                         },
-                        required: ["scientificName", "predictions"],
-                    },
-                },
-            },
-        });
-        const text = response.text.trim();
-        return JSON.parse(text);
+                        timeout: 30000
+                    });
+
+                    if (!response.data || !response.data.success) {
+                        logger.warn(`Backend prediction failed for ${scientificName}`, response.data);
+                        return { scientificName, predictions: [] };
+                    }
+
+                    // Transform response: { lat, lng, risk } -> { lat, lon }
+                    const predictions = (response.data.predictedZones || []).map((zone: any) => ({
+                        lat: zone.lat,
+                        lon: zone.lng || zone.lon
+                    }));
+
+                    return { scientificName, predictions };
+                } catch (err) {
+                    logger.error(`Prediction request failed for ${scientificName}`, err);
+                    return { scientificName, predictions: [] };
+                }
+            })
+        );
+
+        return results;
     } catch (error) {
         logger.error("Failed to predict animal paths", error);
-        // Re-throw the error to be handled by the calling function, which will set the app's error state.
         throw error;
     }
 };
@@ -247,48 +312,60 @@ export const getAIGuideResponse = async (history: ChatMessage[]): Promise<string
         const chat = ai.chats.create({ model: 'gemini-2.5-flash', config: { systemInstruction }, history: contents.slice(0, -1) });
         const lastMessage = contents[contents.length-1].parts[0].text;
         const response = await chat.sendMessage({ message: lastMessage });
-        return response.text;
+        return response.text ?? "I'm sorry, I'm having trouble connecting right now. Please try again later.";
     } catch (error) { logger.error("Failed to get AI guide response", error); return "I'm sorry, I'm having trouble connecting right now. Please try again later."; }
 };
 
-const decodePolyline = (encoded: string): [number, number][] => {
-    const len = encoded.length; let index = 0; const array: [number, number][] = []; let lat = 0; let lng = 0;
-    while (index < len) {
-        let b; let shift = 0; let result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1)); lat += dlat;
-        shift = 0; result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1)); lng += dlng;
-        array.push([lat * 1e-6, lng * 1e-6]);
-    }
-    return array;
-};
+export const getSafeNavigationRoute = async (start: Location, end: Location, mode: TravelMode): Promise<Route | null> => {
+    const baseUrl = getApiBaseUrl();
+    const endpoint = `${baseUrl}/api/safe-route`;
 
-export const getSafeNavigationRoute = async (start: Location, end: Location, avoidPolygons: number[][][], mode: TravelMode): Promise<Route | null> => {
-    const url = 'https://valhalla1.openstreetmap.de/route';
-    const multiPolygonCoordinates = avoidPolygons.map(polygonRing => [polygonRing]);
-    
-    const costingMap: Record<TravelMode, string> = {
-        car: 'auto',
-        bike: 'bicycle',
-        bus: 'bus',
-        walk: 'pedestrian'
-    };
-    const costing = costingMap[mode];
+    // Map TravelMode to ORS profiles
+    const orsMode = mode === 'walk' ? 'foot-walking' : 'driving-car';
 
-    const requestBody = {
-        locations: [{ lat: start.lat, lon: start.lon }, { lat: end.lat, lon: end.lon }],
-        costing: costing,
-        ...(multiPolygonCoordinates.length > 0 && { avoid_polygons: { type: "MultiPolygon", coordinates: multiPolygonCoordinates } }),
-        directions_options: { units: "kilometers" }
-    };
     try {
-        const data = await fetchWithProxyFallbacks(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-        if (data && data.trip) {
-            const leg = data.trip.legs[0];
-            const shape = data.trip.legs.flatMap((l: any) => decodePolyline(l.shape));
-            return { path: shape, distanceKm: parseFloat(leg.summary.length.toFixed(1)), durationMinutes: Math.round(leg.summary.time / 60), start: start, end: end, mode: mode };
-        } else { throw new Error("Invalid route data received from Valhalla API."); }
-    } catch (error: any) { logger.error("Failed to fetch safe navigation route", error); throw new Error(error.message || "Failed to fetch safe navigation route."); }
+        const response = await axios.post<SafeRouteResponse>(endpoint, {
+            start,
+            end,
+            travelMode: orsMode
+        }, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
+        });
+
+        const data = response.data;
+
+        if (!data.success || !data.geometry || !data.geometry.coordinates) {
+            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+                window.alert('Safe route unavailable, try again');
+            }
+            return null;
+        }
+
+        if (data.provider === 'fallback' || data.warning) {
+            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+                window.alert('Approximate route shown (routing service unavailable)');
+            }
+        }
+
+        // ORS returns [lon, lat], swap to [lat, lon]
+        const path: [number, number][] = data.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+
+        return {
+            path,
+            distanceKm: data.distance || 0,
+            durationMinutes: data.duration || 0,
+            start,
+            end,
+            mode,
+        };
+    } catch (error) {
+        logger.error('Failed to fetch safe navigation route from backend', error);
+        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+            window.alert('Safe route unavailable, try again');
+        }
+        return null;
+    }
 };

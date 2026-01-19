@@ -42,6 +42,19 @@ export interface Route {
     mode: TravelMode;
 }
 
+export interface SafeRouteResponse {
+    success: boolean;
+    geometry?: {
+        coordinates: number[][];
+        type: string;
+    };
+    distance?: number;
+    duration?: number;
+    provider?: string;
+    reason?: string;
+    warning?: boolean;
+}
+
 export interface NavigationStats {
     remainingKm: number;
     etaMinutes: number;

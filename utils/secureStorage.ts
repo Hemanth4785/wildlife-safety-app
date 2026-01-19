@@ -1,96 +1,92 @@
-/**
- * Secure storage utility for sensitive data
- * Uses expo-secure-store for encrypted storage on device
- */
-import * as SecureStore from 'expo-secure-store';
+// import * as SecureStore from 'expo-secure-store'; // DISABLED for now
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from './logger';
 
-// Fallback to AsyncStorage for non-sensitive data
-const SECURE_KEYS = ['user-password-hash', 'session-token', 'api-keys'];
+const NAMESPACE = 'ws_wildlifesafety';
 
-/**
- * Simple password hashing using a combination approach
- * Note: For production, consider using a proper library like expo-crypto
- * or implementing bcrypt via a native module
- * This is a basic hash function suitable for demo purposes
- */
-const simpleHash = (str: string): string => {
-  // Add salt
-  const salt = 'wildlife_safety_2024';
-  const salted = str + salt;
-  
-  // Simple hash function
-  let hash = 0;
-  for (let i = 0; i < salted.length; i++) {
-    const char = salted.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
+const buildKey = (key: string): string => {
+  if (!key || !key.trim()) {
+    throw new Error('Storage key must be a non-empty string');
   }
-  
-  // Convert to positive hex string
-  return Math.abs(hash).toString(16).padStart(8, '0');
+  return `${NAMESPACE}_${key}`;
 };
 
-/**
- * Hash a password
- * In production, use a proper cryptographic library
- */
-export const hashPassword = (password: string): string => {
-  return simpleHash(password);
+// Mock SecureStore availability since we are disabling it
+const ensureSecureStoreAvailable = async (): Promise<void> => {
+  return Promise.resolve();
 };
 
-/**
- * Verify a password against a stored hash
- */
-export const verifyPassword = (password: string, hash: string): boolean => {
-  const passwordHash = hashPassword(password);
-  return passwordHash === hash;
-};
-
-/**
- * Store a value securely
- */
-export const secureSetItem = async (key: string, value: string): Promise<void> => {
+export const setSecureItem = async (key: string, value: string): Promise<void> => {
+  const namespacedKey = buildKey(key);
   try {
-    if (SECURE_KEYS.includes(key)) {
-      await SecureStore.setItemAsync(key, value);
-    } else {
-      await AsyncStorage.setItem(key, value);
-    }
+    // Fallback to AsyncStorage
+    await AsyncStorage.setItem(namespacedKey, value);
   } catch (error) {
-    logger.error(`Failed to store ${key}`, error);
-    throw new Error(`Failed to store ${key}`);
+    logger.error('setSecureItem (fallback) failed', error);
+    throw new Error('Storage operation failed');
   }
 };
 
-/**
- * Retrieve a value from secure storage
- */
-export const secureGetItem = async (key: string): Promise<string | null> => {
+export const getSecureItem = async (key: string): Promise<string | null> => {
+  const namespacedKey = buildKey(key);
   try {
-    if (SECURE_KEYS.includes(key)) {
-      return await SecureStore.getItemAsync(key);
-    } else {
-      return await AsyncStorage.getItem(key);
-    }
+    // Fallback to AsyncStorage
+    return await AsyncStorage.getItem(namespacedKey);
   } catch (error) {
-    logger.error(`Failed to retrieve ${key}`, error);
+    logger.error('getSecureItem (fallback) failed', error);
     return null;
   }
 };
 
-/**
- * Remove a value from secure storage
- */
-export const secureRemoveItem = async (key: string): Promise<void> => {
+export const removeSecureItem = async (key: string): Promise<void> => {
+  const namespacedKey = buildKey(key);
   try {
-    if (SECURE_KEYS.includes(key)) {
-      await SecureStore.deleteItemAsync(key);
-    } else {
-      await AsyncStorage.removeItem(key);
-    }
+    // Fallback to AsyncStorage
+    await AsyncStorage.removeItem(namespacedKey);
   } catch (error) {
-    logger.warn(`Failed to remove ${key}`, error);
+    logger.error('removeSecureItem (fallback) failed', error);
   }
+};
+
+export const setPlainItem = async (key: string, value: string): Promise<void> => {
+  const namespacedKey = buildKey(key);
+  try {
+    await AsyncStorage.setItem(namespacedKey, value);
+  } catch (error) {
+    logger.error('setPlainItem failed', error);
+    throw new Error('Storage operation failed');
+  }
+};
+
+export const getPlainItem = async (key: string): Promise<string | null> => {
+  const namespacedKey = buildKey(key);
+  try {
+    return await AsyncStorage.getItem(namespacedKey);
+  } catch (error) {
+    logger.error('getPlainItem failed', error);
+    return null;
+  }
+};
+
+export const removePlainItem = async (key: string): Promise<void> => {
+  const namespacedKey = buildKey(key);
+  try {
+    await AsyncStorage.removeItem(namespacedKey);
+  } catch (error) {
+    logger.error('removePlainItem failed', error);
+  }
+};
+
+export const secureSetItem = setSecureItem;
+export const secureGetItem = getSecureItem;
+export const secureRemoveItem = removeSecureItem;
+
+export const hashPassword = (_password: string): string => {
+  logger.error('hashPassword called on client; this is not supported');
+  throw new Error('Client-side password hashing is not supported');
+};
+
+export const verifyPassword = (_password: string, _hash: string): boolean => {
+  logger.error('verifyPassword called on client; this is not supported');
+  throw new Error('Client-side password verification is not supported');
 };

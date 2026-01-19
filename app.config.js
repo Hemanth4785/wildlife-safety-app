@@ -29,7 +29,8 @@ export default {
       favicon: "./assets/favicon.png"
     },
     extra: {
-      GEMINI_API_KEY: process.env.GEMINI_API_KEY || process.env.EXPO_PUBLIC_GEMINI_API_KEY || ""
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY || process.env.EXPO_PUBLIC_GEMINI_API_KEY || "",
+      API_BASE_URL: "http://192.168.0.105:3000"
     },
     plugins: [
       [
