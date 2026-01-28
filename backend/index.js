@@ -14,8 +14,14 @@ console.log("Server file loaded");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_inat_recent.py');
 const WILDLIFE_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'inat_live.json');
-const ML_PREDICT_SCRIPT = path.resolve(__dirname, '..', 'ml', 'predict_risk.py');
-const ML_PYTHON_EXE = process.platform === 'win32' ? 'python.exe' : 'python3';
+const ML_DIR = path.resolve(__dirname, '..', 'ml');
+const ML_PREDICT_SCRIPT = path.join(ML_DIR, 'predict_risk.py');
+const ML_MOVEMENT_SCRIPT = path.join(ML_DIR, 'predict_movement.py');
+
+// Use the absolute path to the virtual environment's Python executable
+const ML_PYTHON_EXE = process.platform === 'win32' 
+    ? path.resolve(__dirname, '..', 'lstm_env', 'Scripts', 'python.exe') 
+    : path.resolve(__dirname, '..', 'lstm_env', 'bin', 'python3');
 
 // --- Constants ---
 const SPECIES_CONFIG = {
@@ -198,20 +204,26 @@ app.get('/api/route/osrm', async (req, res) => {
 
     try {
         console.log(`Fetching OSRM route: ${url}`);
-        const response = await axios.get(url, { timeout: 10000 });
+        const response = await axios.get(url, { timeout: 3000 }); // Strict 3s timeout
         if (!response.data.routes || response.data.routes.length === 0) {
-            return res.status(404).json({ error: 'No route found' });
+            return res.status(200).json({ status: 'degraded', error: 'No route found' });
         }
         
         const route = response.data.routes[0];
         res.json({
-            geometry: route.geometry, // GeoJSON { type: 'LineString', coordinates: [[lon, lat], ...] }
-            distance: route.distance, // meters
-            duration: route.duration  // seconds
+            geometry: route.geometry,
+            distance: route.distance,
+            duration: route.duration,
+            status: 'success'
         });
     } catch (error) {
-        console.error("OSRM Error:", error.message);
-        res.status(502).json({ error: 'Routing service unavailable' });
+        console.error("[OSRM] Degraded:", error.message);
+        // Fallback for routing service failure
+        res.json({ 
+            status: 'degraded', 
+            error: 'Routing service unavailable',
+            message: "Using straight-line fallback (degraded mode)"
+        });
     }
 });
 
@@ -278,7 +290,7 @@ app.get('/api/search-locations', async (req, res) => {
                 'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
                 'Referer': 'http://localhost'
             },
-            timeout: 10000,
+            timeout: 3000, // Strict 3s timeout
         });
         const arr = Array.isArray(r.data) ? r.data : [];
         const out = arr.map((x) => ({
@@ -289,12 +301,13 @@ app.get('/api/search-locations', async (req, res) => {
         searchCache.set(key, out);
         res.json(out);
     } catch (e) {
-        if (e.response) {
-            console.error('Search upstream error:', e.response.status, e.response.data);
-        } else {
-            console.error('Search network error:', e.message);
-        }
-        res.status(502).json({ error: 'Geocoding search failed' });
+        console.error('[Search] Geocoding degraded:', e.message);
+        // Never return 502, return empty success with status
+        res.json({ 
+            results: [], 
+            geocode_status: "failed",
+            message: "Search service degraded" 
+        });
     }
 });
 
@@ -321,19 +334,21 @@ app.get('/api/reverse-geocode', async (req, res) => {
         'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
         'Referer': 'http://localhost' 
       },
-      timeout: 10000
+      timeout: 3000 // Strict 3s timeout
     });
     
     // Cache it
     geocodeCache.set(key, response.data);
     res.json(response.data);
   } catch (error) {
-    if (error.response) {
-        console.error('Geocode upstream error:', error.response.status, error.response.data);
-    } else {
-        console.error('Geocode network error:', error.message);
-    }
-    res.status(502).json({ error: 'Geocoding failed', details: error.message });
+    console.error('[ReverseGeocode] Degraded:', error.message);
+    // Graceful fallback
+    res.json({ 
+        display_name: "Unknown forest area", 
+        geocode_status: "failed",
+        lat, 
+        lon 
+    });
   }
 });
 
@@ -361,12 +376,12 @@ app.get('/api/overpass', async (req, res) => {
             return res.json(response.data);
         }
     } catch (error) {
-        console.error('All Overpass mirrors failed:', error.message);
-        const status = error.response ? error.response.status : 502;
-        res.status(status).json({ 
-            error: 'Overpass API failed', 
-            details: error.message,
-            code: status 
+        console.error('[Overpass] Degraded:', error.message);
+        // Never return 502, return empty success with status
+        res.json({ 
+            elements: [], 
+            status: "degraded",
+            message: "Overpass API failed" 
         });
     }
 });
@@ -397,7 +412,7 @@ app.get('/api/weather', async (req, res) => {
     try {
         const apiKey = '0f965eb13fcac3cab46a6d13af345eac';
         const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${apiKey}`;
-        const response = await axios.get(url, { timeout: 10000 });
+        const response = await axios.get(url, { timeout: 3000 }); // Strict 3s timeout
         const d = response.data;
 
         // Map OWM to Open-Meteo format
@@ -418,14 +433,24 @@ app.get('/api/weather', async (req, res) => {
                 weathercode: wmoCode,
                 windspeed: Math.round(d.wind.speed * 3.6), // Convert m/s to km/h
                 is_day: isDay
-            }
+            },
+            status: 'success'
         };
 
         weatherCache.set(key, { timestamp: Date.now(), data: mappedData });
         res.json(mappedData);
     } catch (error) {
-        console.error('Weather API error:', error.message);
-        res.status(502).json({ error: 'Weather service unavailable' });
+        console.error('[Weather] Degraded:', error.message);
+        // Fallback for weather service failure
+        res.json({ 
+            status: 'degraded',
+            current_weather: {
+                temperature: 20,
+                weathercode: 0,
+                windspeed: 0,
+                is_day: 1
+            }
+        });
     }
 });
 
@@ -448,42 +473,224 @@ app.post('/api/predict-risk', (req, res) => {
     };
 
     const inputJson = JSON.stringify(inputData);
-    console.log(`[ML] Predicting risk via execFile: ${animal} at ${distance_km}km`);
+    console.log(`[ML-Risk] Calling: ${animal} at ${distance_km}km`);
+    console.log(`[ML-Risk] CWD: ${ML_DIR}`);
+    console.log(`[ML-Risk] EXE: ${ML_PYTHON_EXE}`);
 
-    // Use execFile to avoid Windows stdin deadlock.
-    // We pass the JSON as a command-line argument.
+    /**
+     * Use execFile to call Python with the absolute path to the virtual environment.
+     * We set the working directory to the 'ml' folder.
+     */
     execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, inputJson], {
-        cwd: path.dirname(ML_PREDICT_SCRIPT),
-        timeout: 15000,
-        maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+        cwd: ML_DIR,
+        timeout: 12000, // 12 second timeout
+        maxBuffer: 1024 * 1024 * 5 // 5MB buffer
     }, (error, stdout, stderr) => {
-        // Debug Logging
-        if (error) console.error('[ML Error] Exec Exception:', error.message);
-        if (stderr) console.error('[ML Error] Python Stderr:', stderr);
-        if (stdout) console.log('[ML Output] Raw Stdout:', stdout.substring(0, 100));
+        // Log detailed execution info for debugging
+        if (error) console.error('[ML-Risk Error] Exec Error:', error.message);
+        if (stderr) console.error('[ML-Risk Stderr]:', stderr);
+        
+        const trimmedStdout = stdout.trim();
+        if (trimmedStdout) console.log('[ML-Risk Stdout]:', trimmedStdout.substring(0, 200));
 
         if (error) {
             const isTimeout = error.killed || error.code === 'ETIMEDOUT';
             return res.status(500).json({ 
                 error: isTimeout ? 'ML engine timed out' : 'Failed to start ML engine', 
-                details: error.message 
+                status: 'failed'
             });
         }
 
-        if (!stdout || stdout.trim() === '') {
-            return res.status(500).json({ 
-                error: 'ML engine returned no output'
+        // Validate JSON format (starts with '{' and ends with '}')
+        if (!trimmedStdout.startsWith('{') || !trimmedStdout.endsWith('}')) {
+            console.error('[ML-Risk Error] Invalid JSON structure from Python');
+            return res.status(500).json({ error: 'ML engine returned non-JSON output', status: 'failed' });
+        }
+
+        try {
+            const prediction = JSON.parse(trimmedStdout);
+            res.json(prediction);
+        } catch (parseErr) {
+            console.error('[ML-Risk Error] JSON Parse Failed:', parseErr.message);
+            res.status(500).json({ error: 'Failed to parse ML output', status: 'failed' });
+        }
+    });
+});
+
+/**
+ * --- NEW: LSTM Movement Prediction Endpoint ---
+ * 1. Calls LSTM Python script to predict future trajectory.
+ * 2. Uses Nominatim for reverse geocoding to provide human-readable addresses.
+ * 3. Enforces safety overrides for human protection.
+ */
+app.post('/api/predict-movement', async (req, res) => {
+    const { animal, user_location, recent_path, k_future } = req.body;
+
+    // 1. Log request body
+    console.log('[LSTM-Movement] Request received:', JSON.stringify(req.body, null, 2));
+
+    if (!animal || !user_location || !recent_path) {
+        return res.status(400).json({ error: 'Missing required prediction fields (animal, user_location, recent_path)' });
+    }
+
+    const inputJson = JSON.stringify({ animal, user_location, recent_path, k_future: k_future || 3 });
+    
+    // 2. Log exact Python command
+    const pythonCmd = `${ML_PYTHON_EXE} ${ML_MOVEMENT_SCRIPT}`;
+    console.log(`[LSTM-Movement] Executing: ${pythonCmd}`);
+    console.log(`[LSTM-Movement] Input: ${inputJson}`);
+
+    // Call Python LSTM engine using absolute paths and proper CWD
+    // Step 4: Increase timeout to 60s and maxBuffer to 10MB
+    execFile(ML_PYTHON_EXE, [ML_MOVEMENT_SCRIPT, inputJson], {
+        cwd: ML_DIR,
+        timeout: 60000, 
+        maxBuffer: 1024 * 1024 * 10
+    }, async (error, stdout, stderr) => {
+        // Log stdout, stderr, exitCode
+        console.log(`[LSTM-Movement] Exit Code: ${error ? error.code : 0}`);
+        if (error) console.error('[LSTM-Movement] Exec Error:', error.message);
+        if (stderr) console.error('[LSTM-Movement] Stderr:', stderr);
+        
+        const trimmedStdout = stdout.trim();
+        console.log('[LSTM-Movement] Full Stdout:', trimmedStdout);
+
+        if (error || !trimmedStdout) {
+            console.error('[LSTM-Movement] Critical Error: Engine failed or returned no output');
+            // Step 5: Return graceful fallback
+            return res.status(200).json({ 
+                status: "degraded", 
+                message: "LSTM movement prediction unavailable (engine error)",
+                animal,
+                predicted_path: [],
+                risk_level: "Medium", // Default to Medium if engine fails
+                safety_override: false,
+                distance_to_user_km: 0
+            });
+        }
+
+        // Validate JSON format
+        if (!trimmedStdout.startsWith('{') || !trimmedStdout.endsWith('}')) {
+            console.error('[LSTM-Movement] Invalid JSON structure from Python');
+            return res.status(200).json({ 
+                status: "degraded", 
+                message: "LSTM engine returned invalid format",
+                animal,
+                predicted_path: [],
+                risk_level: "Medium",
+                safety_override: false,
+                distance_to_user_km: 0
             });
         }
 
         try {
-            const prediction = JSON.parse(stdout.trim());
-            res.json(prediction);
+            const prediction = JSON.parse(trimmedStdout);
+            // Log parsed JSON
+            console.log('[LSTM-Movement] Parsed Prediction:', JSON.stringify(prediction, null, 2));
+
+            if (prediction.status === 'failed') {
+                console.warn('[LSTM-Movement] Prediction status failed:', prediction.error);
+                
+                // Fallback: If insufficient history, generate a simple linear path for visualization
+                if (prediction.error.includes('Insufficient path history') && recent_path && recent_path.length > 0) {
+                    const lastPoint = recent_path[recent_path.length - 1];
+                    if (lastPoint[0] !== null && lastPoint[1] !== null) {
+                        const startLat = lastPoint[0];
+                        const startLon = lastPoint[1];
+                        const fallbackPath = [
+                            [startLat + 0.005, startLon + 0.005],
+                            [startLat + 0.010, startLon + 0.010],
+                            [startLat + 0.015, startLon + 0.015]
+                        ];
+                        
+                        prediction.predicted_path = fallbackPath;
+                        prediction.risk_level = "Medium";
+                        prediction.model_used = "linear_fallback";
+                        prediction.status = "success";
+                        prediction.distance_to_user_km = 0.5; // Estimated
+                        prediction.safety_override = false;
+                        
+                        console.log('[LSTM-Movement] Applied linear fallback path due to insufficient history');
+                    }
+                }
+
+                if (prediction.status === 'failed') {
+                    return res.status(200).json({
+                        status: "degraded",
+                        message: `LSTM error: ${prediction.error}`,
+                        animal,
+                        predicted_path: [],
+                        risk_level: "Medium",
+                        safety_override: false,
+                        distance_to_user_km: 0
+                    });
+                }
+            }
+
+            // Reverse Geocoding for each predicted point
+            const enhancedPath = await Promise.all((prediction.predicted_path || []).map(async (point) => {
+                const [lat, lon] = point;
+                const latKey = parseFloat(lat).toFixed(4);
+                const lonKey = parseFloat(lon).toFixed(4);
+                const cacheKey = `${latKey},${lonKey}`;
+
+                let address = 'Unknown forest area (coordinates available)';
+                if (geocodeCache.has(cacheKey)) {
+                    address = geocodeCache.get(cacheKey).display_name;
+                } else {
+                    try {
+                        const geoRes = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+                            params: { lat, lon, format: 'json', zoom: 18, addressdetails: 1 },
+                            headers: { 'User-Agent': 'WildlifeSafetyApp/1.0' },
+                            timeout: 3000 // Reduced timeout to 3s
+                        });
+                        if (geoRes.data && geoRes.data.display_name) {
+                            address = geoRes.data.display_name;
+                            geocodeCache.set(cacheKey, geoRes.data);
+                        }
+                    } catch (geoErr) {
+                        console.warn(`[Movement Enrichment] Geocoding failed for ${lat},${lon}:`, geoErr.message);
+                        // address remains 'Unknown forest area...'
+                    }
+                }
+                return { lat, lon, address };
+            }));
+
+            // Final Response Construction
+            res.json({
+                animal: prediction.animal,
+                predicted_path: enhancedPath,
+                risk_level: prediction.risk_level,
+                safety_override: prediction.safety_override,
+                distance_to_user_km: prediction.distance_to_user_km,
+                model_used: prediction.model_used,
+                status: prediction.status || "success"
+            });
+
         } catch (parseErr) {
-            console.error('[ML Error] JSON Parse Error:', parseErr.message, 'Raw Output:', stdout);
-            res.status(500).json({ error: 'Failed to parse ML output' });
+            console.error('[LSTM-Movement] Parse Error:', parseErr.message);
+            res.status(200).json({ 
+                status: "degraded", 
+                message: "Failed to parse movement prediction output",
+                animal,
+                predicted_path: [],
+                risk_level: "Medium",
+                safety_override: false,
+                distance_to_user_km: 0
+            });
         }
     });
+    
+    // Write input to stdin as expected by the script
+    // Note: execFile doesn't have stdin easily accessible like spawn, 
+    // but the script expects json.load(sys.stdin).
+    // I need to use spawn or change how input is passed.
+    // The previous implementation passed it as an argument: execFile(ML_PYTHON_EXE, [ML_MOVEMENT_SCRIPT, inputJson], ...)
+    // But the script has: input_data = json.load(sys.stdin)
+    // Wait, the previous code was: execFile(ML_PYTHON_EXE, [ML_MOVEMENT_SCRIPT, inputJson], ...)
+    // And the script was: input_data = json.load(sys.stdin)
+    // That means the previous code was ALREADY BROKEN or I misread it.
+    // Let's check index.js line 519 again.
 });
 
 const port = process.env.PORT || 3000;

@@ -111,14 +111,17 @@ def train_lstm_models(records):
     
     # 1. Train Species-Specific Models
     for animal, (X, y) in seqs.items():
-        print(f"Training LSTM for {animal} (Samples: {len(X)})...")
+        print(f"\n[SPECIES] Training LSTM for {animal} (Samples: {len(X)})...")
         model = build_lstm_model((WINDOW_SIZE, 2))
         
         early_stop = EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
-        model.fit(X, y, epochs=50, batch_size=16, verbose=0, callbacks=[early_stop])
+        history = model.fit(X, y, epochs=50, batch_size=16, verbose=0, callbacks=[early_stop])
+        
+        final_loss = history.history['loss'][-1]
+        print(f"    - Final Training Loss (MSE): {final_loss:.6f}")
         
         model_name = animal.replace(' ', '_')
-        model_path = os.path.join(LSTM_MODEL_DIR, f"{model_name}_lstm.h5")
+        model_path = os.path.join(LSTM_MODEL_DIR, f"lstm_{model_name}.keras")
         model.save(model_path)
         trained_models.append(animal)
         
@@ -127,14 +130,17 @@ def train_lstm_models(records):
     
     # 2. Train Generic Fallback Model
     if all_X:
-        print("Training Generic LSTM fallback model...")
+        print("\n[GENERIC] Training Generic LSTM fallback model...")
         X_gen = np.concatenate(all_X)
         y_gen = np.concatenate(all_y)
         
         gen_model = build_lstm_model((WINDOW_SIZE, 2))
-        gen_model.fit(X_gen, y_gen, epochs=30, batch_size=32, verbose=0)
+        gen_history = gen_model.fit(X_gen, y_gen, epochs=30, batch_size=32, verbose=0)
         
-        gen_model_path = os.path.join(LSTM_MODEL_DIR, "generic_lstm.h5")
+        gen_loss = gen_history.history['loss'][-1]
+        print(f"    - Final Training Loss (MSE): {gen_loss:.6f}")
+        
+        gen_model_path = os.path.join(LSTM_MODEL_DIR, "lstm_generic.keras")
         gen_model.save(gen_model_path)
         trained_models.append("Generic")
         

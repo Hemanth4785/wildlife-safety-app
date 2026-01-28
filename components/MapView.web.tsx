@@ -77,6 +77,51 @@ const MapEvents: React.FC<MapEventsProps> = ({ setMap }) => {
     return null;
 }
 
+/**
+ * --- NEW: Prediction Alert Banner ---
+ * Displays critical movement alerts based on LSTM predictions and RF risk classification.
+ * Human safety is prioritized through the safety_override flag.
+ */
+interface PredictionAlertBannerProps {
+    animal: string;
+    riskLevel: string;
+    safetyOverride: boolean;
+    onClose: () => void;
+}
+const PredictionAlertBanner: React.FC<PredictionAlertBannerProps> = ({ animal, riskLevel, safetyOverride, onClose }) => {
+    const isHighRisk = riskLevel === 'High' || safetyOverride;
+    const bgColor = isHighRisk ? 'bg-red-600' : (riskLevel === 'Medium' ? 'bg-orange-500' : 'bg-emerald-600');
+
+    return (
+        <div className="absolute top-20 left-0 right-0 px-4 pointer-events-none z-[1500]">
+            <div className={`max-w-md mx-auto ${bgColor} text-white p-4 rounded-xl shadow-2xl flex items-center gap-4 pointer-events-auto animate-bounce-in`}>
+                <div className="flex-shrink-0">
+                    <AlertTriangleIcon className="w-8 h-8" />
+                </div>
+                <div className="flex-grow">
+                    <h3 className="font-bold text-lg">{safetyOverride ? 'CRITICAL SAFETY ALERT' : `${riskLevel} Risk Alert`}</h3>
+                    <p className="text-sm opacity-90">
+                        {safetyOverride 
+                            ? `Immediate Danger! ${animal} predicted to move within 500m of your location.` 
+                            : `${animal} movement predicted with ${riskLevel.toLowerCase()} risk level.`}
+                    </p>
+                </div>
+                <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg">
+                    <XIcon className="w-6 h-6" />
+                </button>
+            </div>
+            <style>{`
+                @keyframes bounce-in {
+                    0% { transform: scale(0.9); opacity: 0; }
+                    50% { transform: scale(1.05); }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+                .animate-bounce-in { animation: bounce-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+            `}</style>
+        </div>
+    );
+};
+
 // FIX: Created explicit props interface to resolve parsing errors.
 interface NavigationAlertBannerProps {
     alert: NavigationAlert;
@@ -698,6 +743,17 @@ const MapView: React.FC<MapViewProps> = (props) => {
     const [recentSightings, setRecentSightings] = useState<any[]>([]);
     const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
 
+    /**
+     * --- NEW: LSTM Prediction States ---
+     * movementPrediction stores the future trajectory, risk level, and safety overrides.
+     */
+    const [movementPrediction, setMovementPrediction] = useState<{
+        animal: string;
+        predicted_path: { lat: number, lon: number, address: string }[];
+        risk_level: string;
+        safety_override: boolean;
+    } | null>(null);
+
     useEffect(() => {
         let mounted = true;
         const load = async () => {
@@ -789,9 +845,22 @@ const MapView: React.FC<MapViewProps> = (props) => {
         setAnimalClusters(clusters);
     }, [filteredPredictions, map, animationProgress]);
 
-    const handleViewDetails = useCallback((animal: AnimalPrediction) => {
+    const handleViewDetails = useCallback(async (animal: AnimalPrediction) => {
         setDetailModalAnimal(animal);
-    }, []);
+
+        // --- NEW: Trigger LSTM Movement Prediction when viewing details ---
+        if (userLocation && animal.fullPath.length >= 5) {
+            const result = await api.predictMovement(
+                animal.common,
+                userLocation,
+                animal.fullPath.slice(-5) as [number, number][],
+                3
+            );
+            if (result) {
+                setMovementPrediction(result);
+            }
+        }
+    }, [userLocation]);
 
     const initialCenter: [number, number] = userLocation ? [userLocation.lat, userLocation.lon] : MAP_CENTER;
     const initialZoom = userLocation ? 12 : MAP_ZOOM;
@@ -865,6 +934,14 @@ const MapView: React.FC<MapViewProps> = (props) => {
                 {isNavigating && navigationAlert && (
                     <NavigationAlertBanner alert={navigationAlert} onClose={clearNavigationAlert} />
                 )}
+                {movementPrediction && (
+                    <PredictionAlertBanner 
+                        animal={movementPrediction.animal}
+                        riskLevel={movementPrediction.risk_level}
+                        safetyOverride={movementPrediction.safety_override}
+                        onClose={() => setMovementPrediction(null)}
+                    />
+                )}
                 <MapContainer center={initialCenter} zoom={initialZoom} scrollWheelZoom={true} style={{ height: '100%', width: '100%', zIndex: 0 }}>
                     <MapEvents setMap={setMap} />
                     <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
@@ -910,6 +987,9 @@ const MapView: React.FC<MapViewProps> = (props) => {
                                         <b className="text-lg">{p.emoji} {p.common}</b><br/>
                                         <small>Scientific: {p.scientific}</small><br/>
                                         <small>Distance: {p.current.dist_km.toFixed(1)} km</small>
+                                        <button onClick={() => handleViewDetails(p)} className="mt-2 w-full text-center p-2 bg-emerald-600 text-white text-sm font-semibold rounded-md hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1">
+                                            <InfoIcon className="w-4 h-4" /> View Details
+                                        </button>
                                     </div>
                                 </Popup>
                             </Marker>
@@ -960,6 +1040,44 @@ const MapView: React.FC<MapViewProps> = (props) => {
 
                     {isNavigating && navigationStats && <NavigationInfoPanel stats={navigationStats} onStop={onStopNavigation} />}
                     {showWeatherOverlay && <WeatherRadarOverlay />}
+
+                    {/**
+                     * --- NEW: LSTM Predicted Path Visualization ---
+                     * Draws a polyline and markers for future animal movement.
+                     * Path color depends on the Random Forest risk classification.
+                     */}
+                    {movementPrediction && movementPrediction.predicted_path.length > 0 && (
+                        <>
+                            <Polyline 
+                                positions={movementPrediction.predicted_path.map(p => [p.lat, p.lon] as [number, number])}
+                                color={movementPrediction.safety_override || movementPrediction.risk_level === 'High' ? '#dc2626' : (movementPrediction.risk_level === 'Medium' ? '#f97316' : '#10b981')}
+                                weight={4}
+                                dashArray="10, 10"
+                                opacity={0.8}
+                            />
+                            {movementPrediction.predicted_path.map((point, idx) => (
+                                <CircleMarker 
+                                    key={`pred-point-${idx}`}
+                                    center={[point.lat, point.lon]}
+                                    radius={5}
+                                    pathOptions={{
+                                        color: 'white',
+                                        fillColor: movementPrediction.safety_override || movementPrediction.risk_level === 'High' ? '#dc2626' : (movementPrediction.risk_level === 'Medium' ? '#f97316' : '#10b981'),
+                                        fillOpacity: 1,
+                                        weight: 2
+                                    }}
+                                >
+                                    <Popup>
+                                        <div className="p-1">
+                                            <b className="text-emerald-700">Predicted Location {idx + 1}</b>
+                                            <p className="text-xs text-gray-600 mt-1">{point.address}</p>
+                                            <p className="text-[10px] text-gray-400 mt-1 italic">Spatial-temporal forecast via LSTM</p>
+                                        </div>
+                                    </Popup>
+                                </CircleMarker>
+                            ))}
+                        </>
+                    )}
                 </MapContainer>
                 <div className="absolute bottom-4 right-4 z-[1000]">
                     <button
