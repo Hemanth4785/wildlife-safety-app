@@ -9,23 +9,17 @@ const getApiBaseUrl = (): string | null => {
 };
 
 // Native-safe fetch implementation (no CORS proxy needed)
-const nativeFetch = async (url: string, options: RequestInit = {}, retries = 3, backoff = 2000): Promise<any> => {
+const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, backoff = 2000): Promise<any> => {
     try {
         const response = await fetch(url, options);
-        // Handle 502 and 504 specifically as requested
-        if ((response.status === 502 || response.status === 504) && retries > 0) {
-            logger.warn(`Fetch failed with ${response.status}. Retrying in ${backoff}ms... (${retries} attempts left)`);
-            await new Promise(resolve => setTimeout(resolve, backoff));
-            return nativeFetch(url, options, retries - 1, backoff * 2);
-        }
+        // Remove 502/504 retry logic as it causes UI instability when external services are down
         if (!response.ok) {
             throw new Error(`Request failed with status ${response.status}`);
         }
         return await response.json();
     } catch (error: any) {
-        // Also catch network errors and potential 502/504 errors that throw
-        if (retries > 0 && (error.message.includes('Network request failed') || error.message.includes('502') || error.message.includes('504'))) {
-             logger.warn(`Fetch failed (error). Retrying in ${backoff}ms... (${retries} attempts left)`, error);
+        if (retries > 0 && error.message.includes('Network request failed')) {
+             logger.warn(`Fetch failed (network). Retrying in ${backoff}ms... (${retries} attempts left)`, error);
              await new Promise(resolve => setTimeout(resolve, backoff));
              return nativeFetch(url, options, retries - 1, backoff * 2);
         }
@@ -162,6 +156,11 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
 
     try {
         const response = await nativeFetch(url);
+        // Handle degraded success response
+        if (response && response.geocode_status === 'failed') {
+            logger.warn("Location search degraded", response.message);
+            return [];
+        }
         if (!Array.isArray(response)) {
             logger.error("Unexpected response format from location search proxy", response);
             return [];
@@ -179,19 +178,16 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
 
 export const reverseGeocode = async (lat: number, lon: number): Promise<string> => {
     const baseUrl = getApiBaseUrl();
-    if (!baseUrl) return 'Address not found';
+    if (!baseUrl) return 'Unknown forest area';
 
     const url = `${baseUrl}/api/reverse-geocode?lat=${lat}&lon=${lon}`;
     try {
         const response = await nativeFetch(url);
-        if (response && response.error) {
-            logger.warn(`Reverse geocode error from backend: ${response.error}`);
-            return 'Address not found';
-        }
-        return response?.display_name || 'Unknown location';
+        // Backend now returns display_name: "Unknown forest area" on failure
+        return response?.display_name || 'Unknown forest area';
     } catch (error: any) {
         logger.error("Failed to reverse geocode via backend", error);
-        return 'Address not found';
+        return 'Unknown forest area';
     }
 };
 
@@ -288,6 +284,49 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
     } catch (error: any) {
         logger.error('Failed to predict animal paths', error);
         throw new Error(`Failed to predict animal paths: ${error.message}`);
+    }
+};
+
+/**
+ * --- NEW: LSTM Movement Prediction API ---
+ * Calls the backend to get future movement predictions based on recent path.
+ */
+export const predictMovement = async (
+    animal: string, 
+    userLocation: { lat: number, lon: number }, 
+    recentPath: [number, number][], 
+    kFuture: number = 3
+): Promise<{ 
+    animal: string, 
+    predicted_path: { lat: number, lon: number, address: string }[], 
+    risk_level: string, 
+    safety_override: boolean,
+    distance_to_user_km: number,
+    status?: string
+} | null> => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) return null;
+    
+    const url = `${baseUrl}/api/predict-movement`;
+
+    try {
+        // ML retry logic is allowed here (3 retries for ML stability)
+        const response = await nativeFetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                animal,
+                user_location: userLocation,
+                recent_path: recentPath,
+                k_future: kFuture
+            })
+        }, 3); // 3 retries for ML
+        return response;
+    } catch (error) {
+        logger.error("Failed to predict movement after retries", error);
+        return null;
     }
 };
 

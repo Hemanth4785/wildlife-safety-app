@@ -10,6 +10,10 @@ import os
 import warnings
 from datetime import datetime
 
+# Suppress TensorFlow and other logs (must be set BEFORE importing ML libs)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
 # Suppress warnings for cleaner stdout (crucial for Node.js JSON parsing)
 warnings.filterwarnings("ignore")
 
@@ -25,6 +29,7 @@ except ImportError as e:
         "error": f"Missing Python dependencies: {str(e)}. Please run 'pip install joblib pandas scikit-learn'",
         "status": "failed"
     }))
+    sys.stdout.flush()
     sys.exit(0)
 
 # ---------------- CONFIGURATION ---------------- #

@@ -302,6 +302,39 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
     }
 };
 
+/**
+ * --- NEW: LSTM Movement Prediction API ---
+ * Calls the backend to get future movement predictions based on recent path.
+ */
+export const predictMovement = async (
+    animal: string, 
+    userLocation: { lat: number, lon: number }, 
+    recentPath: [number, number][], 
+    kFuture: number = 3
+): Promise<{ 
+    animal: string, 
+    predicted_path: { lat: number, lon: number, address: string }[], 
+    risk_level: string, 
+    safety_override: boolean,
+    distance_to_user_km: number
+} | null> => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/predict-movement`;
+
+    try {
+        const response = await axios.post(url, {
+            animal,
+            user_location: userLocation,
+            recent_path: recentPath,
+            k_future: kFuture
+        });
+        return response.data;
+    } catch (error) {
+        logger.error("Failed to predict movement", error);
+        return null;
+    }
+};
+
 export const getAIGuideResponse = async (history: ChatMessage[]): Promise<string> => {
     return "AI Guide is temporarily unavailable. Please rely on map markers for safety.";
 };

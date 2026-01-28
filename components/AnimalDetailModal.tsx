@@ -63,7 +63,16 @@ const AnimalDetailModal: React.FC<AnimalDetailModalProps> = ({ animal, onClose }
                             {animal.preds.length > 0 ? (
                                 <View style={styles.predictionsList}>
                                     {animal.preds.map((pred, index) => (
-                                        <View key={index} style={styles.predictionItem}>
+                                        <TouchableOpacity 
+                                            key={index} 
+                                            style={styles.predictionItem}
+                                            onPress={(e) => {
+                                                if (e.stopPropagation) e.stopPropagation();
+                                                console.log(`[AnimalDetailModal] Prediction item ${index} clicked`);
+                                                // We don't have a map reference here to pan, 
+                                                // but we stop propagation to prevent closing.
+                                            }}
+                                        >
                                             <View style={styles.predictionNumber}>
                                                 <Text style={styles.predictionNumberText}>{index + 1}</Text>
                                             </View>
@@ -73,7 +82,7 @@ const AnimalDetailModal: React.FC<AnimalDetailModalProps> = ({ animal, onClose }
                                                     {pred.addr ? pred.addr : `Lat: ${pred.lat.toFixed(4)}, Lon: ${pred.lon.toFixed(4)}`}
                                                 </Text>
                                             </View>
-                                        </View>
+                                        </TouchableOpacity>
                                     ))}
                                 </View>
                             ) : (

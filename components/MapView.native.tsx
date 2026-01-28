@@ -11,6 +11,7 @@ import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
 import { clusterAnimals, type AnimalCluster } from '../utils/clustering';
 import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
+import PredictionPanel from './PredictionPanel';
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
 
@@ -76,6 +77,14 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', true);
     const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
     const [showWeatherOverlay, setShowWeatherOverlay] = useLocalStorage<boolean>('map-filter-weather', false);
+    
+    // LSTM Prediction State
+    const [predictedPath, setPredictedPath] = useState<{ lat: number, lon: number, address: string }[] | null>(null);
+    const [predictionLoading, setPredictionLoading] = useState(false);
+    const [predictionRisk, setPredictionRisk] = useState<string | null>(null);
+    const [predictedAnimalName, setPredictedAnimalName] = useState<string>('');
+    const [showPredictionPanel, setShowPredictionPanel] = useState(false);
+    const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
 
@@ -132,6 +141,71 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const handleViewDetails = useCallback((animal: AnimalPrediction) => {
         setDetailModalAnimal(animal);
     }, []);
+
+    const handlePredictMovement = async () => {
+        if (!selectedAnimal || !userLocation) {
+            if (!userLocation) Alert.alert("Location Required", "Please enable location services to use prediction.");
+            return;
+        }
+        
+        setPredictionLoading(true);
+        console.log(`[MapView] Opening prediction for ${selectedAnimal.name}`);
+        try {
+            // Construct path - use current pos as simple path if no history available
+            // Ensure we don't send null coordinates
+            const animalLat = selectedAnimal.lat ?? 0;
+            const animalLon = selectedAnimal.lon ?? 0;
+            const recentPath: [number, number][] = [[animalLat, animalLon]];
+            
+            const result = await api.predictMovement(
+                selectedAnimal.name,
+                userLocation,
+                recentPath,
+                3 // k_future
+            );
+            
+            if (result && result.predicted_path) {
+                setPredictedPath(result.predicted_path);
+                setPredictionRisk(result.risk_level);
+                setPredictedAnimalName(selectedAnimal.name);
+                setShowPredictionPanel(true);
+                setSelectedPointIndex(null);
+                setSelectedAnimal(null); // Close the animal observation modal
+                
+                if (result.status === 'degraded') {
+                    console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
+                }
+                
+                // Fit map to prediction
+                if (mapRef.current && result.predicted_path.length > 0) {
+                     const coords = result.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
+                     coords.push({ latitude: selectedAnimal.lat, longitude: selectedAnimal.lon });
+                     mapRef.current.fitToCoordinates(coords, {
+                         edgePadding: { top: 100, right: 50, bottom: 250, left: 50 }, // More bottom padding for the panel
+                         animated: true
+                     });
+                }
+            } else {
+                Alert.alert("Prediction Unavailable", "Could not predict movement for this animal.");
+            }
+        } catch (e) {
+            Alert.alert("Error", "An error occurred while fetching prediction.");
+        } finally {
+            setPredictionLoading(false);
+        }
+    };
+
+    const handlePointSelect = (point: { lat: number, lon: number, address: string }, index: number) => {
+        setSelectedPointIndex(index);
+        if (mapRef.current) {
+            mapRef.current.animateToRegion({
+                latitude: point.lat,
+                longitude: point.lon,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+            }, 1000);
+        }
+    };
 
     const initialRegion = useMemo(() => {
         if (userLocation) {
@@ -278,6 +352,45 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         />
                     )}
 
+                    {/* LSTM Predicted Path */}
+                    {predictedPath && (
+                        <>
+                            <Polyline
+                                coordinates={predictedPath.map(p => ({ latitude: p.lat, longitude: p.lon }))}
+                                strokeColor={predictionRisk === 'high' ? '#ef4444' : predictionRisk === 'medium' ? '#f59e0b' : '#10b981'}
+                                strokeWidth={4}
+                                lineDashPattern={[5, 5]}
+                                zIndex={10}
+                            />
+                            {predictedPath.map((p, i) => (
+                                <Marker
+                                    key={`pred-${i}`}
+                                    coordinate={{ latitude: p.lat, longitude: p.lon }}
+                                    onPress={() => handlePointSelect(p, i)}
+                                >
+                                    <Callout tooltip={true}>
+                                        <View style={styles.customCallout}>
+                                            <Text style={styles.calloutTitle}>Next Location #{i + 1}</Text>
+                                            <Text style={styles.calloutDetail}>{p.address || 'Unknown forest area'}</Text>
+                                            <Text style={[styles.calloutDetail, { marginTop: 4, fontStyle: 'italic' }]}>
+                                                Lat: {p.lat.toFixed(4)}, Lon: {p.lon.toFixed(4)}
+                                            </Text>
+                                        </View>
+                                    </Callout>
+                                    <View style={[
+                                        styles.indexCircle, 
+                                        { 
+                                            backgroundColor: predictionRisk === 'high' ? '#ef4444' : predictionRisk === 'medium' ? '#f59e0b' : '#10b981',
+                                            transform: [{ scale: selectedPointIndex === i ? 1.2 : 0.8 }]
+                                        }
+                                    ]}>
+                                        <Text style={styles.indexText}>{i + 1}</Text>
+                                    </View>
+                                </Marker>
+                            ))}
+                        </>
+                    )}
+
                     {safeRoute && (
                         <>
                             {/* Base Safe Route (Green) */}
@@ -384,7 +497,9 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                     name: commonName,
                                     image_url: sighting.image_url,
                                     date: sighting.date,
-                                    metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' }
+                                    metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' },
+                                    lat: sighting.lat,
+                                    lon: sighting.lon
                                 })}
                             >
                                 <Text style={styles.animalEmoji}>{emoji}</Text>
@@ -647,6 +762,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         </View>
 
                         <TouchableOpacity 
+                            style={[styles.popupCloseButton, { marginTop: 20, marginBottom: 10, backgroundColor: '#059669' }]} 
+                            onPress={handlePredictMovement}
+                            disabled={predictionLoading}
+                        >
+                            {predictionLoading ? (
+                                <ActivityIndicator color="#ffffff" />
+                            ) : (
+                                <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                                    <InfoIcon width={20} height={20} color="#ffffff" />
+                                    <Text style={styles.popupCloseButtonText}>View Prediction</Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
                             style={styles.popupCloseButton} 
                             onPress={() => setSelectedAnimal(null)}
                         >
@@ -655,6 +785,20 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     </View>
                 </TouchableOpacity>
             </Modal>
+            {showPredictionPanel && predictedPath && (
+                 <PredictionPanel 
+                     animal={predictedAnimalName || 'Animal'}
+                     predictedPath={predictedPath}
+                    riskLevel={predictionRisk || 'Low'}
+                    onClose={() => {
+                        console.log('[MapView] Closing prediction panel');
+                        setShowPredictionPanel(false);
+                        setPredictedPath(null);
+                    }}
+                    onPointSelect={handlePointSelect}
+                    selectedPointIndex={selectedPointIndex}
+                />
+            )}
         </View>
     );
 };
@@ -970,6 +1114,20 @@ const styles = StyleSheet.create({
     },
     animalEmoji: {
         fontSize: 32,
+    },
+    indexCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#ffffff',
+    },
+    indexText: {
+        color: '#ffffff',
+        fontSize: 12,
+        fontWeight: 'bold',
     },
     customCallout: {
         backgroundColor: '#ffffff',
