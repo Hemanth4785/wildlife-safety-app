@@ -31,7 +31,10 @@
     "forceConsistentCasingInFileNames": true,
 
     /* No emit (Expo handles builds) */
-    "noEmit": true
+    "noEmit": true,
+
+    /* Types: Explicitly list to avoid auto-including missing/unused types like jest */
+    "types": ["node", "react"]
   },
 
   "include": [
@@ -44,6 +47,8 @@
     "node_modules",
     "babel.config.js",
     "metro.config.js",
-    "vite.config.ts"
+    "vite.config.ts",
+    "myApp",
+    "backend"
   ]
 }

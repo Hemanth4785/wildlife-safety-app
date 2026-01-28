@@ -1,0 +1,1766 @@
+[
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.8144850549,
+    "lon": 76.0853172323,
+    "eventDate": "2026-01-21",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609708445/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.328540013,
+    "lon": 76.1712720837,
+    "eventDate": "2026-01-18",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609652811/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.4369578198,
+    "lon": 77.77330266,
+    "eventDate": "2026-01-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608128338/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.470553352,
+    "lon": 76.5231516449,
+    "eventDate": "2026-01-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608090480/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.6443626785,
+    "lon": 77.5361758535,
+    "eventDate": "2026-01-14",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/607871510/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.2205781449,
+    "lon": 76.8890102395,
+    "eventDate": "2026-01-14",
+    "image_url": "https://static.inaturalist.org/photos/609163042/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 8.5583250773,
+    "lon": 77.2653196146,
+    "eventDate": "2026-01-04",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/605595965/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.4117310863,
+    "lon": 76.8856345156,
+    "eventDate": "2025-12-26",
+    "image_url": "https://static.inaturalist.org/photos/606880947/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.8783137449,
+    "lon": 76.1905828915,
+    "eventDate": "2025-12-26",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/607734468/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.5982655844,
+    "lon": 76.9767716992,
+    "eventDate": "2025-12-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603932447/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.9478886668,
+    "lon": 76.1033173791,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609900189/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.2698227477,
+    "lon": 76.9082486092,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608957998/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3461273571,
+    "lon": 76.9457120729,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608957854/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3718015474,
+    "lon": 76.9930925197,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608957708/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.3882273456,
+    "lon": 77.5912945177,
+    "eventDate": "2025-12-23",
+    "image_url": "https://static.inaturalist.org/photos/602203109/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.9962729445,
+    "lon": 77.0342765675,
+    "eventDate": "2025-12-19",
+    "image_url": "https://static.inaturalist.org/photos/600988383/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3902858893,
+    "lon": 76.9582368872,
+    "eventDate": "2025-12-18",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/600740507/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6009079681,
+    "lon": 76.5612187056,
+    "eventDate": "2025-12-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/599700623/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.1576192534,
+    "lon": 77.0954525941,
+    "eventDate": "2025-12-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603765872/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 9.4302734962,
+    "lon": 77.0499791309,
+    "eventDate": "2025-12-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/600239789/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3864571737,
+    "lon": 76.946610346,
+    "eventDate": "2025-12-07",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/597968423/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.7717476501,
+    "lon": 76.583184681,
+    "eventDate": "2025-12-01",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596443391/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5859849485,
+    "lon": 76.7814811155,
+    "eventDate": "2025-11-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596459180/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6007659872,
+    "lon": 76.5469461278,
+    "eventDate": "2025-11-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596875206/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 15.7245765165,
+    "lon": 73.8413128548,
+    "eventDate": "2025-11-29",
+    "image_url": "https://static.inaturalist.org/photos/596433367/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.4981654693,
+    "lon": 76.6614739536,
+    "eventDate": "2025-11-29",
+    "image_url": "https://static.inaturalist.org/photos/596956111/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5016142026,
+    "lon": 76.7833264797,
+    "eventDate": "2025-11-29",
+    "image_url": "https://static.inaturalist.org/photos/596894641/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.503501,
+    "lon": 76.5899377312,
+    "eventDate": "2025-11-29",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/595966436/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.7503425512,
+    "lon": 76.7614778274,
+    "eventDate": "2025-11-28",
+    "image_url": "https://static.inaturalist.org/photos/596364259/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.5780446629,
+    "lon": 77.5173443157,
+    "eventDate": "2025-11-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/595185385/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 9.4616892913,
+    "lon": 77.1458426235,
+    "eventDate": "2025-11-20",
+    "image_url": "https://static.inaturalist.org/photos/593074712/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5580882354,
+    "lon": 76.452952498,
+    "eventDate": "2025-11-20",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/593310060/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.4533876303,
+    "lon": 76.498682783,
+    "eventDate": "2025-11-18",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596090463/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6044904019,
+    "lon": 76.4655005199,
+    "eventDate": "2025-11-13",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/591281786/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3340165664,
+    "lon": 76.93732494,
+    "eventDate": "2025-11-13",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592192459/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.3885158796,
+    "lon": 76.8700894254,
+    "eventDate": "2025-11-11",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592191759/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6996124352,
+    "lon": 76.0943978587,
+    "eventDate": "2025-11-08",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/597118725/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6562736494,
+    "lon": 76.6327666352,
+    "eventDate": "2025-11-08",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596416964/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5090976833,
+    "lon": 76.455971563,
+    "eventDate": "2025-11-08",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/595993816/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.4316827583,
+    "lon": 76.4559679641,
+    "eventDate": "2025-11-08",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/593405739/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 12.1427720977,
+    "lon": 77.7259716567,
+    "eventDate": "2025-11-05",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/588761866/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 9.5314481302,
+    "lon": 77.0012825093,
+    "eventDate": "2025-11-01",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603597654/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 9.4356459521,
+    "lon": 77.0360205055,
+    "eventDate": "2025-11-01",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590934869/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.2833030821,
+    "lon": 76.8691524086,
+    "eventDate": "2025-10-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/610297130/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5291770407,
+    "lon": 76.7852251836,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/587007970/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.7036440966,
+    "lon": 76.7376624152,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590099144/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.6056532224,
+    "lon": 76.4282542534,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590094535/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 11.5257049499,
+    "lon": 76.5261889696,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/586896492/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 10.0346343387,
+    "lon": 77.0038756309,
+    "eventDate": "2025-10-24",
+    "image_url": "https://static.inaturalist.org/photos/607138377/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus",
+    "emoji": "\ud83d\udc18",
+    "lat": 9.4983716315,
+    "lon": 77.0362875641,
+    "eventDate": "2025-10-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/595041821/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 11.9483760198,
+    "lon": 76.0804399148,
+    "eventDate": "2025-11-11",
+    "image_url": "https://static.inaturalist.org/photos/590388846/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 11.8281941314,
+    "lon": 76.269014474,
+    "eventDate": "2025-10-04",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/575756336/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 12.0172689414,
+    "lon": 76.1882849545,
+    "eventDate": "2025-09-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603402497/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 12.1466447128,
+    "lon": 76.0595499421,
+    "eventDate": "2025-09-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/565709868/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 11.2302772121,
+    "lon": 76.4713269879,
+    "eventDate": "2025-08-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/560983153/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 12.9291334914,
+    "lon": 77.4335437443,
+    "eventDate": "2025-08-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/552699278/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "emoji": "\ud83d\udc05",
+    "lat": 11.7459798949,
+    "lon": 76.7230096998,
+    "eventDate": "2025-07-31",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/545394526/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Leopard",
+    "scientific_name": "Panthera pardus",
+    "emoji": "\ud83d\udc06",
+    "lat": 22.4515955227,
+    "lon": 58.7373743579,
+    "eventDate": "2026-01-13",
+    "image_url": "https://static.inaturalist.org/photos/608056378/medium.jpg",
+    "metadata": {
+      "scope": "global",
+      "quality_grade": "research",
+      "confidence": "medium"
+    }
+  },
+  {
+    "animal": "Leopard",
+    "scientific_name": "Panthera pardus",
+    "emoji": "\ud83d\udc06",
+    "lat": 23.2321575274,
+    "lon": -15.1154512562,
+    "eventDate": "2025-12-26",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603612734/medium.jpg",
+    "metadata": {
+      "scope": "global",
+      "quality_grade": "research",
+      "confidence": "medium"
+    }
+  },
+  {
+    "animal": "Leopard",
+    "scientific_name": "Panthera pardus",
+    "emoji": "\ud83d\udc06",
+    "lat": 30.985453339,
+    "lon": -3.9898709567,
+    "eventDate": "2025-11-03",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603115190/medium.jpg",
+    "metadata": {
+      "scope": "global",
+      "quality_grade": "research",
+      "confidence": "medium"
+    }
+  },
+  {
+    "animal": "Leopard",
+    "scientific_name": "Panthera pardus",
+    "emoji": "\ud83d\udc06",
+    "lat": 25.1329518607,
+    "lon": 8.680132481,
+    "eventDate": "2025-11-01",
+    "image_url": "https://static.inaturalist.org/photos/604924525/medium.jpg",
+    "metadata": {
+      "scope": "global",
+      "quality_grade": "research",
+      "confidence": "medium"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.8826101341,
+    "lon": 77.1621905419,
+    "eventDate": "2026-01-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/610674057/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.5508862931,
+    "lon": 76.5918383466,
+    "eventDate": "2026-01-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/610687684/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3308406863,
+    "lon": 76.9700149816,
+    "eventDate": "2026-01-19",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609118866/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.2424226356,
+    "lon": 76.9944087422,
+    "eventDate": "2026-01-19",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609118599/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3668126386,
+    "lon": 77.2600626696,
+    "eventDate": "2026-01-17",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/609912313/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 12.1267779073,
+    "lon": 76.1034997484,
+    "eventDate": "2025-12-29",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603560359/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 9.5967191129,
+    "lon": 77.0015192083,
+    "eventDate": "2025-12-28",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603849361/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.2709343419,
+    "lon": 76.805438932,
+    "eventDate": "2025-12-27",
+    "image_url": "https://static.inaturalist.org/photos/606880901/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 15.9477090987,
+    "lon": 74.1085569401,
+    "eventDate": "2025-12-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603907996/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 15.8828012805,
+    "lon": 74.1431272793,
+    "eventDate": "2025-12-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603907997/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 15.8439202958,
+    "lon": 74.1436650194,
+    "eventDate": "2025-12-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603906715/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 12.8339401717,
+    "lon": 75.7881098698,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/604722653/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3113548585,
+    "lon": 76.9977651701,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608958050/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.6727291138,
+    "lon": 76.5088253483,
+    "eventDate": "2025-12-24",
+    "image_url": "https://static.inaturalist.org/photos/606881057/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3444988958,
+    "lon": 76.867769692,
+    "eventDate": "2025-12-24",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608925107/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 15.8255513414,
+    "lon": 74.1819240403,
+    "eventDate": "2025-12-23",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/602450429/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.2211175319,
+    "lon": 76.9344049475,
+    "eventDate": "2025-12-23",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608602297/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.382449486,
+    "lon": 76.866468452,
+    "eventDate": "2025-12-23",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/608602311/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.3826473645,
+    "lon": 76.7256596617,
+    "eventDate": "2025-12-22",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/601738568/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.4558178572,
+    "lon": 76.6049941068,
+    "eventDate": "2025-12-21",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/601470375/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 9.5639669317,
+    "lon": 77.0192528316,
+    "eventDate": "2025-12-12",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/600239709/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 9.5392448681,
+    "lon": 77.0291266947,
+    "eventDate": "2025-12-11",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/600239195/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.7804654504,
+    "lon": 76.5731246585,
+    "eventDate": "2025-12-10",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/599748310/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.4177197655,
+    "lon": 76.521183776,
+    "eventDate": "2025-11-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596451763/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 9.4356809809,
+    "lon": 77.064365086,
+    "eventDate": "2025-11-30",
+    "image_url": "https://static.inaturalist.org/photos/599220381/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.5116189657,
+    "lon": 76.532542515,
+    "eventDate": "2025-11-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596376239/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.4420083823,
+    "lon": 76.6057350386,
+    "eventDate": "2025-11-29",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/596140921/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.5106313453,
+    "lon": 76.7929355632,
+    "eventDate": "2025-11-28",
+    "image_url": "https://static.inaturalist.org/photos/596890642/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.7376605275,
+    "lon": 76.4017346448,
+    "eventDate": "2025-11-26",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/594910657/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.7490179494,
+    "lon": 76.6894263248,
+    "eventDate": "2025-11-19",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592850353/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.5778126079,
+    "lon": 76.7598599277,
+    "eventDate": "2025-11-17",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592766973/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.6015371467,
+    "lon": 76.4834734999,
+    "eventDate": "2025-11-16",
+    "image_url": "https://static.inaturalist.org/photos/599731852/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3347026497,
+    "lon": 76.8334345829,
+    "eventDate": "2025-11-16",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/591941393/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.315485155,
+    "lon": 76.8889426648,
+    "eventDate": "2025-11-16",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592462512/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.2742239316,
+    "lon": 76.812119076,
+    "eventDate": "2025-11-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/591522686/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.3599065369,
+    "lon": 76.8133073985,
+    "eventDate": "2025-11-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592465355/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.468567859,
+    "lon": 76.799024787,
+    "eventDate": "2025-11-06",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/589867329/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.4533076523,
+    "lon": 76.6371735853,
+    "eventDate": "2025-11-06",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/588631799/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 12.0414882293,
+    "lon": 77.7779470527,
+    "eventDate": "2025-11-05",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/588761836/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 12.150573414,
+    "lon": 77.7325703793,
+    "eventDate": "2025-11-05",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/588761779/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 9.4857783629,
+    "lon": 77.1079952228,
+    "eventDate": "2025-11-01",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590937883/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 13.5888776256,
+    "lon": 75.7823717683,
+    "eventDate": "2025-10-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/586708603/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.0808653082,
+    "lon": 77.0155995353,
+    "eventDate": "2025-10-30",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590167870/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 13.5942911573,
+    "lon": 75.7555447297,
+    "eventDate": "2025-10-27",
+    "image_url": "https://static.inaturalist.org/photos/585907734/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.2782198764,
+    "lon": 76.6131481184,
+    "eventDate": "2025-10-11",
+    "image_url": "https://static.inaturalist.org/photos/578814485/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.173616262,
+    "lon": 76.4276527975,
+    "eventDate": "2025-10-11",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/584438199/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.552495532,
+    "lon": 76.7825502642,
+    "eventDate": "2025-10-08",
+    "image_url": "https://static.inaturalist.org/photos/578027433/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.8585657347,
+    "lon": 76.3862148247,
+    "eventDate": "2025-10-05",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/576218695/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.9557012172,
+    "lon": 76.3757513171,
+    "eventDate": "2025-10-03",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/575468581/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 11.8369144005,
+    "lon": 76.3140926634,
+    "eventDate": "2025-10-03",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/575446617/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 15.2890837743,
+    "lon": 74.6931633462,
+    "eventDate": "2025-12-28",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/603672035/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 10.5011375307,
+    "lon": 76.9980398593,
+    "eventDate": "2025-12-26",
+    "image_url": "https://static.inaturalist.org/photos/606880971/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.4988373302,
+    "lon": 76.7213102718,
+    "eventDate": "2025-12-25",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/604688448/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 12.8213408087,
+    "lon": 75.6976001591,
+    "eventDate": "2025-12-17",
+    "image_url": "https://static.inaturalist.org/photos/601633048/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.5428081038,
+    "lon": 76.6122822008,
+    "eventDate": "2025-11-29",
+    "image_url": "https://static.inaturalist.org/photos/596956345/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.7152349807,
+    "lon": 76.7209455537,
+    "eventDate": "2025-11-28",
+    "image_url": "https://static.inaturalist.org/photos/596888577/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.7811795357,
+    "lon": 76.7770076336,
+    "eventDate": "2025-11-28",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/595679159/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.4654718508,
+    "lon": 76.6479796469,
+    "eventDate": "2025-10-28",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/587314596/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.7433230614,
+    "lon": 76.7576664894,
+    "eventDate": "2025-10-28",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/592833250/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.6746400982,
+    "lon": 76.6417678728,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590098530/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.7569010431,
+    "lon": 76.710972475,
+    "eventDate": "2025-10-27",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/590102922/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 11.2429153612,
+    "lon": 76.5263043069,
+    "eventDate": "2025-10-13",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/580566295/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 12.0543884577,
+    "lon": 76.1897322962,
+    "eventDate": "2025-09-07",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/568933913/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 14.782056758,
+    "lon": 78.8678234604,
+    "eventDate": "2025-08-15",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/552749172/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus",
+    "emoji": "\ud83d\udc3b",
+    "lat": 14.7913669128,
+    "lon": 79.2399572391,
+    "eventDate": "2025-07-31",
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/545952120/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
+    }
+  }
+]

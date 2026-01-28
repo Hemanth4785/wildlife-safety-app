@@ -5,7 +5,6 @@ import { AppState, View as ViewType } from '../types';
 import {
   SpinnerIcon,
   ErrorIcon,
-  ShieldIcon,
   AlertTriangleIcon,
   PaperPlaneIcon,
   ChartIcon,
@@ -82,7 +81,7 @@ const RiskLevelCard: React.FC<{ riskScore: number; riskLevel: string; speciesTra
             <View style={styles.riskContent}>
                 <View style={styles.riskLeft}>
                     <View style={styles.riskHeader}>
-                        <ShieldIcon width={24} height={24} color="#ffffff" />
+                        <Text style={{ fontSize: 24 }}>🛡️</Text>
                         <Text style={styles.riskTitle}>Current Risk Level</Text>
                     </View>
                     <Text style={styles.riskLevel}>{riskLevel}</Text>
@@ -168,7 +167,7 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                     {status === AppState.LOADING ? (
                         <SpinnerIcon width={32} height={32} color="#059669" />
                     ) : (
-                        <ShieldIcon width={48} height={48} color="#059669" />
+                        <Text style={{ fontSize: 48 }}>🛡️</Text>
                     )}
                     <Text style={styles.emptyTitle}>
                         {status === AppState.LOADING ? message : 'Welcome to Wildlife Safety!'}

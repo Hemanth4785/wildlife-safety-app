@@ -1,16 +1,11 @@
-import { GoogleGenAI, Type } from "@google/genai/web";
+// Gemini / Google GenAI temporarily disabled. Imports and clients commented out.
+// import { GoogleGenAI, Type } from "@google/genai/web";
 import Constants from 'expo-constants';
 import axios from 'axios';
-import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode, SafeRouteResponse } from '../types';
-import { GBIF_LIMIT } from '../constants';
+import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
 
-// Use Vite env for web builds, Expo Constants for Expo web builds
-const apiKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY
-    ? import.meta.env.VITE_GEMINI_API_KEY
-    : Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
-
-const getApiBaseUrl = () => {
+const getApiBaseUrl = (): string => {
     const baseUrl = Constants.expoConfig?.extra?.API_BASE_URL;
     if (!baseUrl) {
         logger.error("API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.");
@@ -19,56 +14,10 @@ const getApiBaseUrl = () => {
     return baseUrl as string;
 };
 
-if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set VITE_GEMINI_API_KEY in .env.local for Vite builds, or configure it in app.config.js under expo.extra.GEMINI_API_KEY for Expo builds.');
-}
-
-const ai = new GoogleGenAI({ apiKey });
-
-const fetchWithProxyFallbacks = async (url: string, options: RequestInit = {}) => {
-    const method = options.method?.toUpperCase() || 'GET';
-    const PROXIES = [
-        {
-            name: 'CORS.eu.org',
-            buildUrl: (targetUrl: string) => `https://cors.eu.org/${targetUrl.replace(/^https?:\/\//, '')}`,
-            supportedMethods: ['GET', 'POST'],
-            unwrapResponse: (res: Response) => res.json()
-        }
-        // { // Removed due to consistent 'Failed to fetch' errors
-        //     name: 'ThingProxy',
-        //     buildUrl: (targetUrl: string) => `https://thingproxy.freeboard.io/fetch/${targetUrl}`,
-        //     supportedMethods: ['GET', 'POST'],
-        //     unwrapResponse: (res: Response) => res.json()
-        // },
-        // { // Removed due to consistent 'Failed to fetch' errors
-        //     name: 'AllOrigins',
-        //     buildUrl: (targetUrl: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-        //     supportedMethods: ['GET'],
-        //     unwrapResponse: (res: Response) => res.json()
-        // }
-    ];
-    const suitableProxies = PROXIES.filter(p => p.supportedMethods.includes(method));
-    if (suitableProxies.length === 0) throw new Error(`No suitable CORS proxy found for a ${method} request.`);
-    const errors: string[] = [];
-    for (const proxy of suitableProxies) {
-        const proxyUrl = proxy.buildUrl(url);
-        const finalHeaders = { 'X-Requested-With': 'XMLHttpRequest', ...options.headers, ...(proxy as any).headers };
-        const requestOptionsWithHeaders = { ...options, headers: finalHeaders };
-        try {
-            logger.debug(`Fetching via proxy: ${proxy.name} for ${method} request to ${url}`);
-            const response = await fetch(proxyUrl, requestOptionsWithHeaders);
-            if (!response.ok) { const errorText = await response.text(); const truncatedError = errorText.length > 300 ? `${errorText.substring(0, 300)}...` : errorText; throw new Error(`Proxy service failed with status ${response.status}: ${truncatedError}`); }
-            return await proxy.unwrapResponse(response);
-        } catch (error: any) {
-            logger.error(`Proxy ${proxy.name} failed`, error);
-            errors.push(error.message);
-        }
-    }
-    throw new Error(`All proxies failed to fetch the data. Last error: ${errors[errors.length-1]}`);
-};
 
 export const findSafePlacesAlongRoute = async (routePath: [number, number][]): Promise<SafePlace[]> => {
-    if (routePath.length === 0) return [];
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl || routePath.length === 0) return [];
 
     const buffer = 0.05; // ~5km buffer
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
@@ -91,10 +40,13 @@ export const findSafePlacesAlongRoute = async (routePath: [number, number][]): P
         );
         out center;
     `;
-    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+    const url = `${baseUrl}/api/overpass?data=${encodeURIComponent(query)}`;
 
     try {
-        const data = await fetchWithProxyFallbacks(url);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Backend overpass proxy failed with status ${response.status}`);
+        const data = await response.json();
+        
         if (data && data.elements) {
             return data.elements.map((el: any): SafePlace => {
                 const center = el.center || { lat: el.lat, lon: el.lon };
@@ -118,7 +70,8 @@ export const findSafePlacesAlongRoute = async (routePath: [number, number][]): P
 
 
 export const getWeatherData = async (lat: number, lon: number): Promise<WeatherData | null> => {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/weather?lat=${lat}&lon=${lon}`;
     try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -141,7 +94,8 @@ export const getWeatherData = async (lat: number, lon: number): Promise<WeatherD
 };
 
 export const getRainViewerTimestamps = async (): Promise<any> => {
-    const url = 'https://api.rainviewer.com/public/weather-maps.json';
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/rainviewer`;
     try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -157,14 +111,12 @@ export const getRainViewerTimestamps = async (): Promise<any> => {
 
 export const checkBackendHealth = async (): Promise<boolean> => {
     const baseUrl = getApiBaseUrl();
-    const url = `${baseUrl}/test`;
+    const url = `${baseUrl}/api/health`;
     try {
         const response = await fetch(url);
-        if (!response.ok) {
-            return false;
-        }
+        if (!response.ok) return false;
         const data = await response.json();
-        return !!data && data.ok === true;
+        return !!data && data.status === 'ok';
     } catch (error) {
         logger.error('Backend health check failed', error);
         return false;
@@ -174,7 +126,6 @@ export const checkBackendHealth = async (): Promise<boolean> => {
 export const searchLocations = async (query: string): Promise<Location[]> => {
     const baseUrl = getApiBaseUrl();
     const url = `${baseUrl}/api/search-locations?q=${encodeURIComponent(query)}`;
-
     try {
         const response = await axios.get(url);
         const data = response.data;
@@ -182,7 +133,7 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
             logger.error("Unexpected response format from location search proxy", data);
             return [];
         }
-        return data.map((item: any) => ({
+        return data.map((item: { lat: string; lon: string; display_name: string }) => ({
             lat: parseFloat(item.lat),
             lon: parseFloat(item.lon),
             name: item.display_name
@@ -242,6 +193,52 @@ export const getAnimalSightings = async (scientificName: string, location: Locat
         logger.error(`Failed to get sightings for ${scientificName}`, error);
         // Return empty array instead of throwing, so the app doesn't crash
         return [];
+    }
+};
+
+export const getRoute = async (start: Location, end: Location): Promise<Route | null> => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/route/osrm`;
+    try {
+        const response = await axios.get(url, {
+            params: {
+                startLat: start.lat,
+                startLon: start.lon,
+                endLat: end.lat,
+                endLon: end.lon
+            }
+        });
+        
+        const { geometry, distance, duration } = response.data;
+        
+        // Convert GeoJSON coordinates [lon, lat] to [lat, lon]
+        const path: [number, number][] = geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+        
+        return {
+            path,
+            distanceKm: distance / 1000,
+            durationMinutes: duration / 60,
+            start,
+            end,
+            mode: 'car' // Default
+        };
+    } catch (error) {
+        logger.error("Failed to fetch route", error);
+        return null;
+    }
+};
+
+export const getAnimalsNearRoute = async (routePath: [number, number][]): Promise<{ riskZones: any[]; riskySegments: any[] }> => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/api/animals/near-route`;
+    const routeGeometry = routePath.map(p => [p[1], p[0]]);
+    try {
+        const response = await axios.post(url, { routeGeometry });
+        const d = response.data;
+        return { riskZones: d.riskZones || [], riskySegments: d.riskySegments || [] };
+    } catch (error) {
+        logger.error("Failed to fetch animals near route", error);
+        return { riskZones: [], riskySegments: [] };
     }
 };
 
@@ -306,66 +303,50 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
 };
 
 export const getAIGuideResponse = async (history: ChatMessage[]): Promise<string> => {
-    const systemInstruction = "You are a navigation and safety assistant. Given a user’s current location and their destination, your task is to find the safest route. Safety means avoiding unsafe areas such as isolated alleys, highways without pedestrian access, or regions flagged with higher risk. Always prioritize well-lit, populated, and frequently used roads.\n\nAlong the route, also identify and highlight the nearest safe places such as police stations, wildlife checkposts, or forest ranger posts that the user can approach in case of emergency. Provide the route directions, estimated time, and distance, along with markers showing these safe places. If multiple routes are available, rank them by safety first, and travel time second. Finally, explain why the chosen route and safe places are considered safe (e.g., ‘police station within 2 km’, ‘route passes through main road with public presence’)..";
-    const contents = history.map(msg => ({ role: msg.role, parts: [{ text: msg.text }] }));
-    try {
-        const chat = ai.chats.create({ model: 'gemini-2.5-flash', config: { systemInstruction }, history: contents.slice(0, -1) });
-        const lastMessage = contents[contents.length-1].parts[0].text;
-        const response = await chat.sendMessage({ message: lastMessage });
-        return response.text ?? "I'm sorry, I'm having trouble connecting right now. Please try again later.";
-    } catch (error) { logger.error("Failed to get AI guide response", error); return "I'm sorry, I'm having trouble connecting right now. Please try again later."; }
+    return "AI Guide is temporarily unavailable. Please rely on map markers for safety.";
 };
 
-export const getSafeNavigationRoute = async (start: Location, end: Location, mode: TravelMode): Promise<Route | null> => {
+// --- Fetch Recent Wildlife from Backend (GBIF via Python) ---
+export const fetchRecentWildlife = async (): Promise<any[]> => {
     const baseUrl = getApiBaseUrl();
-    const endpoint = `${baseUrl}/api/safe-route`;
-
-    // Map TravelMode to ORS profiles
-    const orsMode = mode === 'walk' ? 'foot-walking' : 'driving-car';
-
+    const url = `${baseUrl}/api/gbif/recent`;
     try {
-        const response = await axios.post<SafeRouteResponse>(endpoint, {
-            start,
-            end,
-            travelMode: orsMode
-        }, {
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            timeout: 30000
-        });
-
-        const data = response.data;
-
-        if (!data.success || !data.geometry || !data.geometry.coordinates) {
-            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-                window.alert('Safe route unavailable, try again');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to fetch recent wildlife: ${response.status}`);
+        const data = await response.json();
+        const list = Array.isArray(data) ? data : [];
+        const limited = list.slice(0, 20);
+        return await Promise.all(limited.map(async (record: { animal: string; scientific_name: string; lat: number; lon: number; eventDate: string; emoji?: string }) => {
+            const lat = parseFloat(String(record.lat));
+            const lon = parseFloat(String(record.lon));
+            let address = record.eventDate;
+            try {
+                const addr = await reverseGeocode(lat, lon);
+                if (addr && addr !== 'Address not found') address = addr;
+            } catch {
+                /* ignore */
             }
-            return null;
-        }
-
-        if (data.provider === 'fallback' || data.warning) {
-            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-                window.alert('Approximate route shown (routing service unavailable)');
-            }
-        }
-
-        // ORS returns [lon, lat], swap to [lat, lon]
-        const path: [number, number][] = data.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
-
-        return {
-            path,
-            distanceKm: data.distance || 0,
-            durationMinutes: data.duration || 0,
-            start,
-            end,
-            mode,
-        };
+            return {
+                id: `${record.scientific_name}-${record.eventDate}-${lat}`,
+                name: record.animal,
+                scientificName: record.scientific_name,
+                emoji: record.emoji || '🐾',
+                lat,
+                lon,
+                date: record.eventDate,
+                address,
+                type: 'sighting' as const,
+            };
+        }));
     } catch (error) {
-        logger.error('Failed to fetch safe navigation route from backend', error);
-        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-            window.alert('Safe route unavailable, try again');
-        }
-        return null;
+        logger.error("Error fetching recent wildlife", error);
+        return [];
     }
+};
+
+/** Uses OSRM (getRoute) only. No /api/safe-route; no straight-line fallback. */
+export const getSafeNavigationRoute = async (start: Location, end: Location, mode: TravelMode): Promise<Route | null> => {
+    const route = await getRoute(start, end);
+    if (!route) return null;
+    return { ...route, mode };
 };

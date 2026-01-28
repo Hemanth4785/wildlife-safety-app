@@ -1,0 +1,46 @@
+animal,scientific_name,lat,lon,eventDate
+Asian Elephant,"Elephas maximus Linnaeus, 1758",8.558325,77.26532,2026-01-04
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.628043,76.821527,2025-09-01
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.251624,76.842309,2025-09-06
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.345653,76.823249,2025-09-06
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.33464,76.834326,2025-09-06
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.263144,76.902261,2025-09-06
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.217101,76.862827,2025-09-06
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.743166,77.182053,2025-09-13
+Asian Elephant,"Elephas maximus Linnaeus, 1758",10.485757,77.054397,2025-09-06
+Asian Elephant,"Elephas maximus Linnaeus, 1758",10.475673,76.990494,2025-09-01
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.621583,79.257307,2025-09-18
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.430304,76.525275,2025-10-18
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.525705,76.526189,2025-10-27
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.529177,76.785225,2025-10-27
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.509098,76.455972,2025-11-08
+Asian Elephant,"Elephas maximus Linnaeus, 1758",10.388516,76.870089,2025-11-11
+Asian Elephant,"Elephas maximus Linnaeus, 1758",10.334017,76.937325,2025-11-13
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.431683,76.455968,2025-11-08
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.558088,76.452952,2025-11-20
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.600766,76.546946,2025-11-30
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",11.453388,76.498683,2025-11-18
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.503501,76.589938,2025-11-29
+Asian Elephant,"Elephas maximus Linnaeus, 1758",11.585985,76.781481,2025-11-30
+Asian Elephant,"Elephas maximus indicus Cuvier, 1798",10.386457,76.94661,2025-12-07
+Asian Elephant,"Elephas maximus Linnaeus, 1758",10.390286,76.958237,2025-12-18
+Leopard,"Panthera pardus fusca (Meyer, 1794)",11.73837,77.175535,2025-09-01
+Gaur,"Bos gaurus C.H.Smith, 1827",11.201381,76.675432,2025-09-15
+Gaur,"Bos gaurus C.H.Smith, 1827",11.654862,77.197137,2025-09-01
+Gaur,"Bos gaurus C.H.Smith, 1827",10.226291,76.866234,2025-09-23
+Gaur,"Bos gaurus C.H.Smith, 1827",11.299898,76.681494,2025-09-24
+Gaur,"Bos gaurus C.H.Smith, 1827",10.587042,77.086003,2025-09-04
+Gaur,"Bos gaurus C.H.Smith, 1827",11.453308,76.637174,2025-11-06
+Gaur,"Bos gaurus C.H.Smith, 1827",11.468568,76.799025,2025-11-06
+Gaur,"Bos gaurus C.H.Smith, 1827",11.577813,76.75986,2025-11-17
+Gaur,"Bos gaurus C.H.Smith, 1827",11.359907,76.813307,2025-11-15
+Gaur,"Bos gaurus C.H.Smith, 1827",10.334703,76.833435,2025-11-16
+Gaur,"Bos gaurus C.H.Smith, 1827",11.315485,76.888943,2025-11-16
+Gaur,"Bos gaurus C.H.Smith, 1827",11.274224,76.812119,2025-11-15
+Gaur,"Bos gaurus C.H.Smith, 1827",11.41772,76.521184,2025-11-30
+Gaur,"Bos gaurus C.H.Smith, 1827",11.511619,76.532543,2025-11-30
+Gaur,"Bos gaurus C.H.Smith, 1827",11.455818,76.604994,2025-12-21
+Gaur,"Bos gaurus C.H.Smith, 1827",11.382647,76.72566,2025-12-22
+Sloth Bear,"Melursus ursinus (Shaw, 1791)",11.242915,76.526304,2025-10-13
+Sloth Bear,"Melursus ursinus (Shaw, 1791)",11.465472,76.64798,2025-10-28
+Sloth Bear,"Melursus ursinus (Shaw, 1791)",11.498837,76.72131,2025-12-25

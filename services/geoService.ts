@@ -1,5 +1,5 @@
 // FIX: Corrected import path for types
-import type { Location } from '../types';
+import type { Location, SafePlace } from '../types';
 
 export const calculateDistance = (loc1: Location | {lat: number, lon: number}, loc2: Location | {lat: number, lon: number}): number => {
     const R = 6371; // Radius of the Earth in km
@@ -144,4 +144,52 @@ export const getPathDataFromLocation = (userLocation: Location, routePath: [numb
         distanceToPathKm: minDistance,
         closestPointIndex: closestPointIndex
     };
+};
+
+// Helper to format distance
+export const formatDistance = (distanceInMeters: number): string => {
+    if (distanceInMeters < 1000) {
+        return `${Math.round(distanceInMeters)} m`;
+    }
+    return `${(distanceInMeters / 1000).toFixed(1)} km`;
+};
+
+// Helper to format duration
+export const formatDuration = (durationInMinutes: number): string => {
+    const totalMinutes = Math.round(durationInMinutes);
+    
+    if (totalMinutes < 60) {
+        return `${totalMinutes} min`;
+    }
+    
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    if (minutes === 0) {
+        return `${hours} hr`;
+    }
+    
+    return `${hours} hr ${minutes} min`;
+};
+
+// Helper to calculate minimum distance from a point to a polyline (simplified to closest vertex)
+export const calculateMinDistanceToPolyline = (point: {lat: number, lon: number}, polyline: [number, number][]): number => {
+    let minDistance = Infinity;
+    // Optimization: Check every Nth point to speed up, or check all if short.
+    // For accuracy we check all vertices.
+    for (const [lat, lon] of polyline) {
+        const dist = calculateDistance(point, {lat, lon});
+        if (dist < minDistance) {
+            minDistance = dist;
+        }
+    }
+    return minDistance; // in km
+};
+
+// Filter safe places near route
+export const filterSafePlaces = (safePlaces: SafePlace[], routePolyline: [number, number][]): SafePlace[] => {
+    return safePlaces.filter(place => {
+        const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, routePolyline);
+        return distKm <= 1; // 1 km
+    });
 };

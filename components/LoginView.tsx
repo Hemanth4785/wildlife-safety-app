@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { ShieldIcon } from './icons';
 
 interface LoginViewProps {
     onAuth: (mode: 'login' | 'signup', name: string, email: string, pass: string) => Promise<string | null>;
@@ -45,7 +44,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onAuth }: LoginViewProps) => {
             >
                 <View style={styles.card}>
                     <View style={styles.header}>
-                        <ShieldIcon width={48} height={48} color="#059669" />
+                        <Text style={{ fontSize: 48 }}>🛡️</Text>
                         <Text style={styles.title}>
                             {mode === 'login' ? 'Welcome Back' : 'Create Account'}
                         </Text>
