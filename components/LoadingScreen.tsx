@@ -1,9 +1,8 @@
 /**
- * Loading screen component with skeleton UI
+ * Full-screen loading. Used for app init, backend health check.
  */
 import React from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
-import { SpinnerIcon } from './icons';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
 interface LoadingScreenProps {
   message?: string;
@@ -13,9 +12,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ message = 'Loading
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color="#059669" />
-      <View style={styles.spinnerContainer}>
-        <SpinnerIcon width={32} height={32} color="#059669" />
-      </View>
+      <Text style={styles.message}>{message}</Text>
     </View>
   );
 };
@@ -27,7 +24,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f9fafb',
   },
-  spinnerContainer: {
+  message: {
     marginTop: 16,
+    fontSize: 16,
+    color: '#374151',
+    fontWeight: '500',
   },
 });

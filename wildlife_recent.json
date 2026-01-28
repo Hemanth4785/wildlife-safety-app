@@ -1,0 +1,317 @@
+[
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 8.558325,
+    "lon": 77.26532,
+    "eventDate": "2026-01-04"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.628043,
+    "lon": 76.821527,
+    "eventDate": "2025-09-01"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.251624,
+    "lon": 76.842309,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.345653,
+    "lon": 76.823249,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.33464,
+    "lon": 76.834326,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.263144,
+    "lon": 76.902261,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.217101,
+    "lon": 76.862827,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.743166,
+    "lon": 77.182053,
+    "eventDate": "2025-09-13"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 10.485757,
+    "lon": 77.054397,
+    "eventDate": "2025-09-06"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 10.475673,
+    "lon": 76.990494,
+    "eventDate": "2025-09-01"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.621583,
+    "lon": 79.257307,
+    "eventDate": "2025-09-18"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.430304,
+    "lon": 76.525275,
+    "eventDate": "2025-10-18"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.525705,
+    "lon": 76.526189,
+    "eventDate": "2025-10-27"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.529177,
+    "lon": 76.785225,
+    "eventDate": "2025-10-27"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.509098,
+    "lon": 76.455972,
+    "eventDate": "2025-11-08"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 10.388516,
+    "lon": 76.870089,
+    "eventDate": "2025-11-11"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 10.334017,
+    "lon": 76.937325,
+    "eventDate": "2025-11-13"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.431683,
+    "lon": 76.455968,
+    "eventDate": "2025-11-08"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.558088,
+    "lon": 76.452952,
+    "eventDate": "2025-11-20"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.600766,
+    "lon": 76.546946,
+    "eventDate": "2025-11-30"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 11.453388,
+    "lon": 76.498683,
+    "eventDate": "2025-11-18"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.503501,
+    "lon": 76.589938,
+    "eventDate": "2025-11-29"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 11.585985,
+    "lon": 76.781481,
+    "eventDate": "2025-11-30"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus indicus Cuvier, 1798",
+    "lat": 10.386457,
+    "lon": 76.94661,
+    "eventDate": "2025-12-07"
+  },
+  {
+    "animal": "Asian Elephant",
+    "scientific_name": "Elephas maximus Linnaeus, 1758",
+    "lat": 10.390286,
+    "lon": 76.958237,
+    "eventDate": "2025-12-18"
+  },
+  {
+    "animal": "Leopard",
+    "scientific_name": "Panthera pardus fusca (Meyer, 1794)",
+    "lat": 11.73837,
+    "lon": 77.175535,
+    "eventDate": "2025-09-01"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.201381,
+    "lon": 76.675432,
+    "eventDate": "2025-09-15"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.654862,
+    "lon": 77.197137,
+    "eventDate": "2025-09-01"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 10.226291,
+    "lon": 76.866234,
+    "eventDate": "2025-09-23"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.299898,
+    "lon": 76.681494,
+    "eventDate": "2025-09-24"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 10.587042,
+    "lon": 77.086003,
+    "eventDate": "2025-09-04"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.453308,
+    "lon": 76.637174,
+    "eventDate": "2025-11-06"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.468568,
+    "lon": 76.799025,
+    "eventDate": "2025-11-06"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.577813,
+    "lon": 76.75986,
+    "eventDate": "2025-11-17"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.359907,
+    "lon": 76.813307,
+    "eventDate": "2025-11-15"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 10.334703,
+    "lon": 76.833435,
+    "eventDate": "2025-11-16"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.315485,
+    "lon": 76.888943,
+    "eventDate": "2025-11-16"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.274224,
+    "lon": 76.812119,
+    "eventDate": "2025-11-15"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.41772,
+    "lon": 76.521184,
+    "eventDate": "2025-11-30"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.511619,
+    "lon": 76.532543,
+    "eventDate": "2025-11-30"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.455818,
+    "lon": 76.604994,
+    "eventDate": "2025-12-21"
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus C.H.Smith, 1827",
+    "lat": 11.382647,
+    "lon": 76.72566,
+    "eventDate": "2025-12-22"
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus (Shaw, 1791)",
+    "lat": 11.242915,
+    "lon": 76.526304,
+    "eventDate": "2025-10-13"
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus (Shaw, 1791)",
+    "lat": 11.465472,
+    "lon": 76.64798,
+    "eventDate": "2025-10-28"
+  },
+  {
+    "animal": "Sloth Bear",
+    "scientific_name": "Melursus ursinus (Shaw, 1791)",
+    "lat": 11.498837,
+    "lon": 76.72131,
+    "eventDate": "2025-12-25"
+  }
+]

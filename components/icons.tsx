@@ -60,12 +60,6 @@ export const ErrorIcon: React.FC<IconProps> = ({ width = defaultSize, height = d
   </Svg>
 );
 
-export const ShieldIcon: React.FC<IconProps> = ({ width = defaultSize, height = defaultSize, color = defaultColor }) => (
-  <Svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
-    <Path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-  </Svg>
-);
-
 export const PaperPlaneIcon: React.FC<IconProps> = ({ width = defaultSize, height = defaultSize, color = defaultColor }) => (
   <Svg width={width} height={height} viewBox="0 0 20 20" fill={color}>
     <Path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />

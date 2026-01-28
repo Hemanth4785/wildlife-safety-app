@@ -4,9 +4,11 @@ import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAler
 import { AppState } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS } from '../constants';
 import L from 'leaflet';
-import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, ShieldIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
+import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
 import AnimalDetailModal from './AnimalDetailModal';
+import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
+import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
 
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
@@ -147,7 +149,7 @@ const MapController: React.FC<MapControllerProps> = ({ userLocation, route, isNa
                 const userPoint = map.project([liveLocation.lat, liveLocation.lon], targetZoom);
                 const newCenterPoint = userPoint.add(offset);
                 const newCenterLatLng = map.unproject(newCenterPoint, targetZoom);
-                map.setView(newCenterLatLng, targetZoom, { animate: true, pan: { duration: 1 }, zoom: { animate: true } });
+                map.setView(newCenterLatLng, targetZoom, { animate: true, duration: 1 });
             }
         } else {
             // Not navigating, or no live location yet
@@ -556,8 +558,10 @@ const rangerSvgPath = `<path stroke-linecap="round" stroke-linejoin="round" d="M
 
 interface SafePlaceMarkerProps {
     place: SafePlace;
+    distanceStr?: string;
+    durationStr?: string;
 }
-const SafePlaceMarker: React.FC<SafePlaceMarkerProps> = ({ place }) => {
+const SafePlaceMarker: React.FC<SafePlaceMarkerProps> = ({ place, distanceStr, durationStr }) => {
     const icon = useMemo(() => {
         const isPolice = place.type === 'police';
         const bgColor = isPolice ? 'bg-blue-600' : 'bg-green-700';
@@ -582,6 +586,8 @@ const SafePlaceMarker: React.FC<SafePlaceMarkerProps> = ({ place }) => {
             <Popup>
                 <b>{place.name}</b><br/>
                 <span className="capitalize">{place.type}</span>
+                {distanceStr && <><br/><span className="text-sm text-gray-600">Dist: {distanceStr}</span></>}
+                {durationStr && <><br/><span className="text-sm text-gray-600">Time: {durationStr}</span></>}
             </Popup>
         </Marker>
     );
@@ -590,11 +596,12 @@ const SafePlaceMarker: React.FC<SafePlaceMarkerProps> = ({ place }) => {
 interface RouteSummaryPanelProps {
     route: Route;
     safePlaces: SafePlace[];
+    riskZones: any[];
     predictions: AnimalPrediction[];
     onClose: () => void;
     onStartNavigation: () => void;
 }
-const RouteSummaryPanel: React.FC<RouteSummaryPanelProps> = ({ route, safePlaces, predictions, onClose, onStartNavigation }) => (
+const RouteSummaryPanel: React.FC<RouteSummaryPanelProps> = ({ route, safePlaces, riskZones, onClose, onStartNavigation }) => (
     <div className="absolute bottom-0 left-0 right-0 z-[1100] p-4 bg-white rounded-t-2xl shadow-2xl animate-slide-up">
         <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold text-gray-800">Your Safe Route is Ready!</h2>
@@ -602,23 +609,23 @@ const RouteSummaryPanel: React.FC<RouteSummaryPanelProps> = ({ route, safePlaces
         </div>
         <div className="flex justify-around items-center text-center mb-4 p-3 bg-gray-50 rounded-lg">
             <div>
-                <p className="text-2xl font-bold text-gray-800">{route.distanceKm}</p>
+                <p className="text-2xl font-bold text-gray-800">{route.distanceKm.toFixed(1)}</p>
                 <p className="text-xs text-gray-500">KM</p>
             </div>
             <div>
-                <p className="text-2xl font-bold text-gray-800">{route.durationMinutes}</p>
-                <p className="text-xs text-gray-500">MINS</p>
+                <p className="text-2xl font-bold text-gray-800">{formatDuration(route.durationMinutes)}</p>
+                <p className="text-xs text-gray-500">DURATION</p>
             </div>
             <div>
-                <p className="text-2xl font-bold text-red-500">{predictions.length}</p>
-                <p className="text-xs text-gray-500">RISKS AVOIDED</p>
+                <p className="text-2xl font-bold text-red-500">{riskZones.length}</p>
+                <p className="text-xs text-gray-500">RISKS DETECTED</p>
             </div>
              <div>
                 <p className="text-2xl font-bold text-blue-600">{safePlaces.length}</p>
                 <p className="text-xs text-gray-500">SAFE SPOTS</p>
             </div>
         </div>
-        <p className="text-sm text-gray-600 mb-4 px-2">This route has been optimized to avoid {predictions.length} predicted wildlife paths and passes near {safePlaces.length} designated safe places.</p>
+        <p className="text-sm text-gray-600 mb-4 px-2">This route passes near {riskZones.length} potential wildlife risk zones and {safePlaces.length} designated safe places.</p>
         <button onClick={onStartNavigation} className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-lg shadow hover:bg-emerald-700 flex items-center justify-center gap-2">
             Start Navigation
         </button>
@@ -632,7 +639,7 @@ const RouteSummaryPanel: React.FC<RouteSummaryPanelProps> = ({ route, safePlaces
     </div>
 );
 
-// --- Main Map View ---
+// --- Main  ---
 interface MapViewProps {
     status: AppState;
     message: string;
@@ -640,6 +647,8 @@ interface MapViewProps {
     predictions: AnimalPrediction[];
     safeRoute: Route | null;
     safePlaces: SafePlace[];
+    riskZones: Array<{ lat: number; lon: number; name?: string; scientific_name?: string; emoji?: string; distanceToRoute?: number }>;
+    riskySegments: any[];
     onLocationSubmit: (location: string) => void;
     suggestions: Location[];
     isSuggesting: boolean;
@@ -667,7 +676,7 @@ interface MapViewProps {
 
 const MapView: React.FC<MapViewProps> = (props) => {
     const { 
-        userLocation, predictions, animationProgress, nearbyRadiusKm, 
+        userLocation, predictions, riskZones, animationProgress, nearbyRadiusKm, 
         safeRoute, safePlaces, isNavigating, liveLocation, navigationStats, 
         onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
         isPlaying, onPlay, onPause, isApproachingStart
@@ -685,6 +694,24 @@ const MapView: React.FC<MapViewProps> = (props) => {
     const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', true);
     const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
     const [showWeatherOverlay, setShowWeatherOverlay] = useLocalStorage<boolean>('map-filter-weather', false);
+
+    const [recentSightings, setRecentSightings] = useState<any[]>([]);
+    const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
+
+    useEffect(() => {
+        let mounted = true;
+        const load = async () => {
+            setIsWildlifeLoading(true);
+            try {
+                const data = await api.fetchRecentWildlife();
+                if (mounted) setRecentSightings(data);
+            } finally {
+                if (mounted) setIsWildlifeLoading(false);
+            }
+        };
+        load();
+        return () => { mounted = false; };
+    }, []);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
 
@@ -779,9 +806,33 @@ const MapView: React.FC<MapViewProps> = (props) => {
         return { completedPath: [], remainingPath: safeRoute?.path || [] };
     }, [isNavigating, safeRoute, liveLocation, closestPathIndex]);
 
+    const processedSafePlaces = useMemo(() => {
+        if (!safeRoute) return safePlaces.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
+
+        const placesWithDist = safePlaces.map(place => {
+            const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, safeRoute.path);
+            return { ...place, distKm };
+        });
+
+        const filtered = placesWithDist.filter(p => p.distKm <= 1);
+
+        return filtered.map(p => {
+             const distMeters = p.distKm * 1000;
+             // Estimate duration: walking 5km/h => 12 min/km
+             const durationMin = (p.distKm / 5) * 60; 
+             
+             return {
+                 ...p,
+                 distanceStr: formatDistance(distMeters),
+                 durationStr: formatDuration(durationMin)
+             };
+        });
+    }, [safePlaces, safeRoute]);
+
 
     return (
-        <div className="h-full w-full flex flex-col bg-white">
+        <div className="h-full w-full flex flex-col bg-white relative">
+            <LoadingOverlay visible={isWildlifeLoading} message="Loading wildlife data…" />
             <header className="px-4 py-3 flex justify-between items-center border-b border-gray-200 bg-white z-10">
                 <h1 className="text-xl font-bold text-gray-800">Wildlife Safety Map</h1>
                 <div className="flex items-center gap-2">
@@ -839,22 +890,74 @@ const MapView: React.FC<MapViewProps> = (props) => {
                         </>
                     )}
                     
-                    {animalClusters.map(cluster => {
-                        const pathIndex = pathIndexRef.current;
-                        if (cluster.members.length > 1) {
-                           return <ClusterMarker key={cluster.id} cluster={cluster} progress={pathIndex} onViewDetails={handleViewDetails} />;
-                        } else if (cluster.members.length === 1) {
-                            const p = cluster.members[0];
-                            return (
-                                <React.Fragment key={p.id}>
-                                    <Polyline positions={p.fullPath.slice(0, pathIndex + 1)} color={p.color} weight={4} opacity={0.7} />
-                                    <AnimatedAnimalMarker prediction={p} progress={pathIndex} onViewDetails={handleViewDetails} />
-                                </React.Fragment>
-                            );
-                        }
-                        return null;
+                    {!isWildlifeLoading && predictions.length === 0 && (
+                        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-full shadow-lg z-[1000] text-gray-600 font-medium pointer-events-none">
+                            No recent wildlife sightings
+                        </div>
+                    )}
+
+                    {predictions.map(p => {
+                        const icon = new L.DivIcon({
+                             html: `<div class="text-3xl" style="text-shadow: 0 0 5px white;">${p.emoji}</div>`,
+                             className: 'leaflet-div-icon',
+                             iconSize: [32, 32],
+                             iconAnchor: [16, 16]
+                        });
+                        return (
+                            <Marker key={`pred-${p.id}`} position={[p.current.lat, p.current.lon]} icon={icon}>
+                                <Popup>
+                                    <div style={{width: 200}}>
+                                        <b className="text-lg">{p.emoji} {p.common}</b><br/>
+                                        <small>Scientific: {p.scientific}</small><br/>
+                                        <small>Distance: {p.current.dist_km.toFixed(1)} km</small>
+                                    </div>
+                                </Popup>
+                            </Marker>
+                        );
                     })}
-                    {safePlaces.map(place => <SafePlaceMarker key={place.id} place={place} />)}
+                    {processedSafePlaces.map(place => <SafePlaceMarker key={place.id} place={place} distanceStr={place.distanceStr} durationStr={place.durationStr} />)}
+                    
+                    {/* Animal markers: near route only (riskZones) when we have a route; else recent sightings */}
+                    {safeRoute && riskZones.length > 0
+                        ? riskZones.map((zone, idx) => {
+                            const lat = typeof zone.lat === 'number' ? zone.lat : parseFloat(zone.lat);
+                            const lon = typeof zone.lon === 'number' ? zone.lon : parseFloat(zone.lon);
+                            if (isNaN(lat) || isNaN(lon)) return null;
+                            const emoji = zone.emoji || '🐾';
+                            const icon = new L.DivIcon({
+                                html: `<div class="text-2xl" style="text-shadow:0 0 4px white">${emoji}</div>`,
+                                className: 'leaflet-div-icon',
+                                iconSize: [28, 28],
+                                iconAnchor: [14, 14],
+                            });
+                            return (
+                                <Marker key={`risk-${zone.scientific_name}-${idx}-${lat}-${lon}`} position={[lat, lon]} icon={icon}>
+                                    <Popup>
+                                        <b>{zone.name ?? zone.scientific_name ?? 'Wildlife'}</b><br/>
+                                        <small>{zone.distanceToRoute != null ? `${zone.distanceToRoute.toFixed(1)} km from route` : ''}</small>
+                                    </Popup>
+                                </Marker>
+                            );
+                          })
+                        : recentSightings.map((sighting) => (
+                            <Marker
+                                key={sighting.id}
+                                position={[sighting.lat, sighting.lon]}
+                                icon={new L.DivIcon({
+                                    html: `<div class="text-2xl" style="text-shadow:0 0 4px white">${sighting.emoji || '🐾'}</div>`,
+                                    className: 'leaflet-div-icon',
+                                    iconSize: [28, 28],
+                                    iconAnchor: [14, 14],
+                                })}
+                            >
+                                <Popup>
+                                    <b>{sighting.name}</b><br/>
+                                    <small>Seen: {sighting.date}</small>
+                                    {sighting.address && <><br/><small>{sighting.address}</small></>}
+                                </Popup>
+                            </Marker>
+                        ))}
+
                     {isNavigating && navigationStats && <NavigationInfoPanel stats={navigationStats} onStop={onStopNavigation} />}
                     {showWeatherOverlay && <WeatherRadarOverlay />}
                 </MapContainer>
@@ -871,6 +974,7 @@ const MapView: React.FC<MapViewProps> = (props) => {
                     <RouteSummaryPanel 
                         route={safeRoute}
                         safePlaces={safePlaces}
+                        riskZones={riskZones}
                         predictions={predictions}
                         onClose={() => setShowRouteSummary(false)}
                         onStartNavigation={() => {
@@ -886,11 +990,11 @@ const MapView: React.FC<MapViewProps> = (props) => {
                     <div className="flex items-center gap-2">
                         <AlertTriangleIcon className="w-5 h-5 text-red-500" />
                         <div>
-                            <span className="font-bold">{filteredPredictions.length}</span> Risk Zones
+                            <span className="font-bold">{safeRoute ? riskZones.length : filteredPredictions.length}</span> Risk Zones
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <ShieldIcon className="w-5 h-5 text-emerald-600" />
+                        <span className="text-xl">🛡️</span>
                         <div>
                            <span className="font-bold">{safeRoute ? 1 : 0}</span> Safe Routes
                         </div>

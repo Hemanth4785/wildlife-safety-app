@@ -1,5 +1,3 @@
-import { LocationIcon } from './icons';
-
 export type TravelMode = 'car' | 'bike' | 'bus' | 'walk';
 
 export interface Location {
@@ -12,6 +10,7 @@ export interface Sighting {
     lat: number;
     lon: number;
     image?: string;
+    image_url?: string;
     dist?: number; // Distance from user
 }
 
@@ -116,4 +115,6 @@ export interface SafePlace {
     lon: number;
     type: 'police' | 'ranger';
     name: string;
+    contact?: string;
+    address?: string;
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { ShieldIcon, LocationIcon, PaperPlaneIcon, AlertTriangleIcon } from './icons';
+import { LocationIcon, PaperPlaneIcon, AlertTriangleIcon } from './icons';
 
 interface OnboardingGuideProps {
     onClose: () => void;
@@ -8,7 +8,7 @@ interface OnboardingGuideProps {
 
 const STEPS = [
     {
-        icon: <ShieldIcon width={64} height={64} color="#059669" />,
+        icon: <Text style={{ fontSize: 64 }}>🛡️</Text>,
         title: "Welcome to Wildlife Safety!",
         description: "Your guide to navigating safely in areas with wildlife. Let's walk through the key features to get you started.",
     },

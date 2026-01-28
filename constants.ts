@@ -22,7 +22,7 @@ interface AnimalInfo {
 export const ANIMALS: Record<string, AnimalInfo> = {
     'Panthera pardus': { common: 'Leopard', emoji: '🐆', color: '#f97316' },
     'Elephas maximus': { common: 'Asian Elephant', emoji: '🐘', color: '#64748b' },
-    'Bos gaurus': { common: 'Gaur (Indian Bison)', emoji: '🐃', color: '#1e293b' },
+    'Bos gaurus': { common: 'Gaur', emoji: '🦬', color: '#1e293b' },
     'Panthera tigris': { common: 'Tiger', emoji: '🐅', color: '#dc2626' },
     'Melursus ursinus': { common: 'Sloth Bear', emoji: '🐻', color: '#78350f' },
     // Added Rhino for completeness if needed by other features
@@ -33,7 +33,7 @@ export const ANIMALS: Record<string, AnimalInfo> = {
 interface Avatar {
     id: string;
     name: string;
-    icon: React.FC<React.SVGProps<SVGSVGElement>>;
+    icon: any;
 }
 
 export const AVATARS: Record<string, Avatar> = {

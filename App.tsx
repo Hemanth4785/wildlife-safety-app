@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View as RNView, StyleSheet, SafeAreaView } from 'react-native';
+import { View as RNView, StyleSheet } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useAnimalData } from './hooks/useAnimalData';
 import { View } from './types';
 import { ANIMATION_STEPS, ANIMATION_DURATION_MS } from './constants';
@@ -20,7 +21,7 @@ const AppContent: React.FC = () => {
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
         suggestions, isSuggesting, fetchSuggestions, clearSuggestions,
-        safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces,
+        safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces, riskZones, riskySegments,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,
@@ -103,7 +104,7 @@ const AppContent: React.FC = () => {
             case View.MAP:
                 return <MapView 
                         status={status} message={message} userLocation={userLocation} predictions={predictions} safeRoute={safeRoute}
-                        safePlaces={safePlaces}
+                        safePlaces={safePlaces} riskZones={riskZones} riskySegments={riskySegments}
                         onLocationSubmit={processLocationSearch} suggestions={suggestions} isSuggesting={isSuggesting}
                         onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} routeStatus={routeStatus}
                         routeMessage={routeMessage} onCalculateSafeRoute={calculateSafeRoute} getCurrentLocation={getCurrentLocation}
@@ -151,7 +152,9 @@ const App: React.FC = () => {
     return (
         <ErrorBoundary>
             <AppProvider>
-                <AppContent />
+                <SafeAreaProvider>
+                    <AppContent />
+                </SafeAreaProvider>
             </AppProvider>
         </ErrorBoundary>
     );

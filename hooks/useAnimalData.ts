@@ -55,6 +55,8 @@ export const useAnimalData = () => {
     const debounceTimeout = useRef<number | null>(null);
     const [safeRoute, setSafeRoute] = useState<Route | null>(null);
     const [safePlaces, setSafePlaces] = useState<SafePlace[]>([]);
+    const [riskZones, setRiskZones] = useState<any[]>([]);
+    const [riskySegments, setRiskySegments] = useState<any[]>([]);
     const [routeStatus, setRouteStatus] = useState<AppState>(AppState.IDLE);
     const [routeMessage, setRouteMessage] = useState('');
     const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -76,7 +78,7 @@ export const useAnimalData = () => {
     useEffect(() => {
         isNavigatingRef.current = isNavigating;
     }, [isNavigating]);
-    const predictionsRef = useRef(predictions);
+    const predictionsRef = useRef<AnimalPrediction[]>(predictions);
     useEffect(() => { predictionsRef.current = predictions; }, [predictions]);
     const navigationAlertRef = useRef(navigationAlert);
     useEffect(() => { navigationAlertRef.current = navigationAlert; }, [navigationAlert]);
@@ -143,7 +145,7 @@ export const useAnimalData = () => {
                     common: animalInfo.common,
                     emoji: animalInfo.emoji,
                     color: animalInfo.color,
-                    image: currentSighting.image,
+                    image: currentSighting.image_url,
                     current: { ...currentPoint, addr: currentAddr, dist_km: parseFloat(distance.toFixed(1)) },
                     preds: pathPoints, // No reverse geocoding for all points
                     fullPath
@@ -203,7 +205,9 @@ export const useAnimalData = () => {
         setRouteMessage('Calculating safest route...');
         setSafeRoute(null);
         setSafePlaces([]);
-    
+        setRiskZones([]);
+        setRiskySegments([]);
+
         try {
             let startLoc: Location, endLoc: Location;
             if (typeof start === 'string') {
@@ -220,17 +224,21 @@ export const useAnimalData = () => {
             } else {
                 endLoc = end;
             }
-    
-            const searchCenter = geo.getMidpoint(startLoc, endLoc);
-            const relevantPredictions: AnimalPrediction[] = isNavigatingRef.current
-                ? predictionsRef.current
-                : await getPredictionsForArea(searchCenter);
 
-        const route = await api.getSafeNavigationRoute(startLoc, endLoc, mode);
-        if (route) {
-            setSafeRoute(route);
-                const places = await api.findSafePlacesAlongRoute(route.path);
+            const route = await api.getRoute(startLoc, endLoc);
+            if (route) {
+                setSafeRoute(route);
+                
+                // Fetch risk zones and safe places in parallel
+                const [places, riskData] = await Promise.all([
+                    api.findSafePlacesAlongRoute(route.path),
+                    api.getAnimalsNearRoute(route.path)
+                ]);
+
                 setSafePlaces(places);
+                setRiskZones(riskData.riskZones);
+                setRiskySegments(riskData.riskySegments);
+                
                 setRouteStatus(AppState.SUCCESS);
                 setRouteMessage('Safe route found!');
                 return route;
@@ -244,7 +252,7 @@ export const useAnimalData = () => {
             setRouteMessage(error.message || 'Failed to calculate route.');
             return null;
         }
-    }, [getPredictionsForArea]);
+    }, []);
     
 
     const fetchSuggestions = useCallback((query: string) => {
@@ -258,7 +266,7 @@ export const useAnimalData = () => {
             const results = await api.searchLocations(query);
             setSuggestions(results);
             setIsSuggesting(false);
-        }, 300);
+        }, 300) as unknown as number;
     }, []);
 
     const clearSuggestions = useCallback(() => setSuggestions([]), []);
@@ -447,13 +455,14 @@ export const useAnimalData = () => {
                     
                     let closestAnimal: AnimalPrediction | null = null;
                     let closestDistKm = Infinity;
-                    predictionsRef.current.forEach((animal: AnimalPrediction) => {
+                    const preds = predictionsRef.current;
+                    for (const animal of preds) {
                         const { distanceToPathKm: distKm } = geo.getPathDataFromLocation(currentLiveLocation, animal.fullPath);
                         if (distKm < closestDistKm) {
                             closestDistKm = distKm;
                             closestAnimal = animal;
                         }
-                    });
+                    }
 
                     if (closestAnimal && closestDistKm < PROXIMITY_ALERT_KM) {
                         lastRerouteTimestampRef.current = now;
@@ -474,7 +483,7 @@ export const useAnimalData = () => {
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
         suggestions, isSuggesting, fetchSuggestions, clearSuggestions,
-        safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces,
+        safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces, riskZones, riskySegments,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,

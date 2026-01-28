@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, Alert } from 'react-native';
-import MapViewNative, { Marker, Polyline, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
+import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
+import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
 import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode } from '../types';
 import { AppState } from '../types';
-import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS } from '../constants';
+import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS } from '../constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, ShieldIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
+import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
 import AnimalDetailModal from './AnimalDetailModal';
+import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
 import { clusterAnimals, type AnimalCluster } from '../utils/clustering';
+import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
 
@@ -20,6 +22,8 @@ interface MapViewProps {
     predictions: AnimalPrediction[];
     safeRoute: Route | null;
     safePlaces: SafePlace[];
+    riskZones: any[];
+    riskySegments: any[];
     onLocationSubmit: (location: string) => void;
     suggestions: Location[];
     isSuggesting: boolean;
@@ -48,17 +52,18 @@ interface MapViewProps {
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const { 
         userLocation, predictions, animationProgress, nearbyRadiusKm, 
-        safeRoute, safePlaces, isNavigating, liveLocation, navigationStats, 
+        safeRoute, safePlaces, riskZones, riskySegments, isNavigating, liveLocation, navigationStats, 
         onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
         isPlaying, onPlay, onPause, isApproachingStart,
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
         isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation
     } = props;
     
-    const mapRef = useRef<MapViewNative>(null);
+    const mapRef = useRef<MapView>(null);
     const [isPlanningRoute, setIsPlanningRoute] = useState(false);
     const [detailModalAnimal, setDetailModalAnimal] = useState<AnimalPrediction | null>(null);
     const [animalClusters, setAnimalClusters] = useState<AnimalCluster[]>([]);
+    const [selectedAnimal, setSelectedAnimal] = useState<any>(null);
     const pathIndexRef = useRef(0);
     const [showRouteSummary, setShowRouteSummary] = useState(false);
     const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
@@ -66,6 +71,24 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', true);
     const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
     const [showWeatherOverlay, setShowWeatherOverlay] = useLocalStorage<boolean>('map-filter-weather', false);
+
+    const [recentSightings, setRecentSightings] = useState<any[]>([]);
+    const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
+
+    useEffect(() => {
+        let mounted = true;
+        const load = async () => {
+            setIsWildlifeLoading(true);
+            try {
+                const data = await api.fetchRecentWildlife();
+                if (mounted) setRecentSightings(data);
+            } finally {
+                if (mounted) setIsWildlifeLoading(false);
+            }
+        };
+        load();
+        return () => { mounted = false; };
+    }, []);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
 
@@ -185,8 +208,36 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }
     }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart]);
 
+    const processedSafePlaces = useMemo(() => {
+        if (!safeRoute) return safePlaces.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
+
+        const placesWithDist = safePlaces.map(place => {
+            const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, safeRoute.path);
+            return { ...place, distKm };
+        });
+
+        const filtered = placesWithDist.filter(p => p.distKm <= 1);
+
+        return filtered.map(p => {
+             const distMeters = p.distKm * 1000;
+             const durationMin = (p.distKm / 5) * 60; 
+             
+             return {
+                 ...p,
+                 distanceStr: formatDistance(distMeters),
+                 durationStr: formatDuration(durationMin)
+             };
+        });
+    }, [safePlaces, safeRoute]);
+
     return (
         <View style={styles.container}>
+            <LoadingOverlay visible={isWildlifeLoading} message="Loading wildlife data..." />
+            {!isWildlifeLoading && predictions.length === 0 && (
+                <View style={styles.noWildlifeContainer}>
+                    <Text style={styles.noWildlifeText}>No recent wildlife sightings</Text>
+                </View>
+            )}
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Wildlife Safety Map</Text>
                 <View style={styles.headerActions}>
@@ -214,7 +265,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     </View>
                 )}
 
-                <MapViewNative
+                <MapView
                     ref={mapRef}
                     provider={PROVIDER_GOOGLE}
                     style={styles.map}
@@ -242,27 +293,35 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
                     {safeRoute && (
                         <>
-                            {isNavigating ? (
-                                <>
-                                    <Polyline
-                                        coordinates={completedPath.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                        strokeColor="#6b7280"
-                                        strokeWidth={5}
-                                        lineDashPattern={[5, 10]}
-                                    />
-                                    <Polyline
-                                        coordinates={remainingPath.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                        strokeColor="#10b981"
-                                        strokeWidth={7}
-                                    />
-                                </>
-                            ) : (
+                            {/* Base Safe Route (Green) */}
+                            <Polyline
+                                coordinates={safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
+                                strokeColor="#10b981"
+                                strokeWidth={6}
+                                zIndex={1}
+                            />
+
+                            {/* Risky Segments (Red) */}
+                            {riskySegments && riskySegments.map((segment: [number, number][], index: number) => (
                                 <Polyline
-                                    coordinates={safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                    strokeColor="#10b981"
+                                    key={`risky-${index}`}
+                                    coordinates={segment.map(([lat, lon]: [number, number]) => ({ latitude: lat, longitude: lon }))}
+                                    strokeColor="#ef4444"
                                     strokeWidth={6}
+                                    zIndex={2}
                                 />
-                            )}
+                            ))}
+
+                            {isNavigating ? (
+                                <Polyline
+                                    coordinates={completedPath.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
+                                    strokeColor="#6b7280"
+                                    strokeWidth={5}
+                                    lineDashPattern={[5, 10]}
+                                    zIndex={3}
+                                />
+                            ) : null}
+
                             <Marker
                                 coordinate={{ latitude: safeRoute.end.lat, longitude: safeRoute.end.lon }}
                                 title="Destination"
@@ -270,6 +329,81 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             />
                         </>
                     )}
+
+                    {/* Risk Zones (Animals near route) — emoji markers */}
+                    {riskZones && riskZones.map((zone, index) => {
+                         const lat = parseFloat(String(zone.lat));
+                         const lon = parseFloat(String(zone.lon));
+                         if (isNaN(lat) || isNaN(lon)) return null;
+                         const animalInfo = ANIMALS[zone.scientific_name];
+                         const commonName = animalInfo?.common ?? zone.name ?? zone.scientific_name;
+                         const emoji = animalInfo?.emoji ?? zone.emoji ?? '⚠️';
+                         return (
+                            <React.Fragment key={`risk-${zone.scientific_name}-${index}-${lat}-${lon}`}>
+                                <Circle
+                                    center={{ latitude: lat, longitude: lon }}
+                                    radius={(zone.alertRadius ?? 1.5) * 1000}
+                                    strokeColor="rgba(239, 68, 68, 0.5)"
+                                    fillColor="rgba(239, 68, 68, 0.1)"
+                                    strokeWidth={1}
+                                />
+                                <Marker
+                                    coordinate={{ latitude: lat, longitude: lon }}
+                                    onPress={() => setSelectedAnimal({
+                                        name: commonName,
+                                        image_url: zone.image_url,
+                                        date: zone.eventDate,
+                                        metadata: zone.metadata || { scope: 'regional', confidence: 'medium' }
+                                    })}
+                                >
+                                    <Text style={styles.animalEmoji}>{emoji}</Text>
+                                </Marker>
+                            </React.Fragment>
+                        );
+                    })}
+
+                    {/* Safe Places */}
+                    {processedSafePlaces.map(place => (
+                        <Marker
+                            key={place.id}
+                            coordinate={{ latitude: place.lat, longitude: place.lon }}
+                        >
+                            <Text style={{ fontSize: 28 }}>
+                                {place.type === 'police' ? '👮' : '🌲'}
+                            </Text>
+                            <Callout tooltip={true}>
+                                <View style={styles.customCallout}>
+                                    <Text style={styles.calloutTitle}>{place.name}</Text>
+                                    <Text style={styles.calloutType}>{place.type === 'police' ? 'Police Station' : 'Forest Office'}</Text>
+                                    {place.contact && <Text style={styles.calloutDetail}>Contact: {place.contact}</Text>}
+                                    {place.address && <Text style={styles.calloutDetail}>Addr: {place.address}</Text>}
+                                    {place.distanceStr && <Text style={styles.calloutDetail}>Dist: {place.distanceStr}</Text>}
+                                    {place.durationStr && <Text style={styles.calloutDetail}>Time: {place.durationStr}</Text>}
+                                </View>
+                            </Callout>
+                        </Marker>
+                    ))}
+
+                    {/* Recent wildlife: near-route only when we have a route; otherwise all recent */}
+                    {!safeRoute && recentSightings.map((sighting) => {
+                         const animalInfo = ANIMALS[sighting.scientificName];
+                         const commonName = animalInfo?.common ?? sighting.name;
+                         const emoji = animalInfo?.emoji ?? sighting.emoji ?? '🐾';
+                         return (
+                            <Marker
+                                key={`marker-${sighting.id}`}
+                                coordinate={{ latitude: sighting.lat, longitude: sighting.lon }}
+                                onPress={() => setSelectedAnimal({
+                                    name: commonName,
+                                    image_url: sighting.image_url,
+                                    date: sighting.date,
+                                    metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' }
+                                })}
+                            >
+                                <Text style={styles.animalEmoji}>{emoji}</Text>
+                            </Marker>
+                         );
+                    })}
 
                     {animalClusters.map(cluster => {
                         const pathIndex = pathIndexRef.current;
@@ -310,19 +444,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         return null;
                     })}
 
-                    {safePlaces.map(place => (
-                        <Marker
-                            key={place.id}
-                            coordinate={{ latitude: place.lat, longitude: place.lon }}
-                            title={place.name}
-                            description={place.type}
-                        >
-                            <View style={[styles.safePlaceMarker, place.type === 'police' ? styles.policeMarker : styles.rangerMarker]}>
-                                <ShieldIcon width={16} height={16} color="#ffffff" />
-                            </View>
-                        </Marker>
-                    ))}
-                </MapViewNative>
+                </MapView>
 
                 <TouchableOpacity
                     style={styles.playButton}
@@ -334,8 +456,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 {isNavigating && navigationStats && (
                     <View style={styles.navigationPanel}>
                         <View style={styles.navigationStats}>
-                            <Text style={styles.etaText}>{navigationStats.etaMinutes}<Text style={styles.etaUnit}> min</Text></Text>
-                            <Text style={styles.distanceText}>{navigationStats.remainingKm} km remaining</Text>
+                            <Text style={styles.etaText}>{formatDuration(navigationStats.etaMinutes)}</Text>
+                            <Text style={styles.distanceText}>{navigationStats.remainingKm.toFixed(1)} km remaining</Text>
                         </View>
                         <TouchableOpacity style={styles.stopButton} onPress={onStopNavigation}>
                             <StopIcon width={24} height={24} color="#ffffff" />
@@ -348,10 +470,10 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 <View style={styles.footerStats}>
                     <View style={styles.statItem}>
                         <AlertTriangleIcon width={20} height={20} color="#ef4444" />
-                        <Text style={styles.statText}>{filteredPredictions.length} Risk Zones</Text>
+                        <Text style={styles.statText}>{safeRoute && riskZones ? riskZones.length : filteredPredictions.length} Risk Zones</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <ShieldIcon width={20} height={20} color="#10b981" />
+                        <Text style={{ fontSize: 16 }}>🛡️</Text>
                         <Text style={styles.statText}>{safeRoute ? 1 : 0} Safe Routes</Text>
                     </View>
                 </View>
@@ -420,21 +542,26 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 </TouchableOpacity>
                             </View>
                             <View style={styles.routeSummaryStats}>
-                                <View style={styles.routeStat}>
-                                    <Text style={styles.routeStatValue}>{safeRoute.distanceKm}</Text>
-                                    <Text style={styles.routeStatLabel}>KM</Text>
+                                <View style={styles.routeStatGroup}>
+                                    <View style={styles.routeStat}>
+                                        <Text style={styles.routeStatValue}>{safeRoute.distanceKm.toFixed(1)} KM</Text>
+                                        <Text style={styles.routeStatLabel}>DISTANCE</Text>
+                                    </View>
+                                    <View style={styles.routeStat}>
+                                        <Text style={styles.routeStatValue}>{formatDuration(safeRoute.durationMinutes)}</Text>
+                                        <Text style={styles.routeStatLabel}>DURATION</Text>
+                                    </View>
                                 </View>
-                                <View style={styles.routeStat}>
-                                    <Text style={styles.routeStatValue}>{safeRoute.durationMinutes}</Text>
-                                    <Text style={styles.routeStatLabel}>MINS</Text>
-                                </View>
-                                <View style={styles.routeStat}>
-                                    <Text style={[styles.routeStatValue, styles.riskValue]}>{predictions.length}</Text>
-                                    <Text style={styles.routeStatLabel}>RISKS AVOIDED</Text>
-                                </View>
-                                <View style={styles.routeStat}>
-                                    <Text style={[styles.routeStatValue, styles.safeValue]}>{safePlaces.length}</Text>
-                                    <Text style={styles.routeStatLabel}>SAFE SPOTS</Text>
+                                <View style={styles.routeStatDivider} />
+                                <View style={styles.routeStatGroup}>
+                                    <View style={styles.routeStat}>
+                                        <Text style={[styles.routeStatValue, styles.riskValue]}>{predictions.length}</Text>
+                                        <Text style={styles.routeStatLabel}>RISKS AVOIDED</Text>
+                                    </View>
+                                    <View style={styles.routeStat}>
+                                        <Text style={[styles.routeStatValue, styles.safeValue]}>{safePlaces.length}</Text>
+                                        <Text style={styles.routeStatLabel}>SAFE SPOTS</Text>
+                                    </View>
                                 </View>
                             </View>
                             <TouchableOpacity
@@ -468,6 +595,77 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             {detailModalAnimal && (
                 <AnimalDetailModal animal={detailModalAnimal} onClose={() => setDetailModalAnimal(null)} />
             )}
+
+            {/* Selected Animal Interaction Popup */}
+            <Modal
+                visible={!!selectedAnimal}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setSelectedAnimal(null)}
+            >
+                <TouchableOpacity 
+                    style={styles.modalOverlay} 
+                    activeOpacity={1} 
+                    onPress={() => setSelectedAnimal(null)}
+                >
+                    <View style={styles.animalDetailPopup}>
+                        <View style={styles.popupHeader}>
+                            <Text style={styles.popupTitle}>Animal Observation</Text>
+                            <TouchableOpacity onPress={() => setSelectedAnimal(null)}>
+                                <XIcon width={24} height={24} color="#374151" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.popupContent}>
+                            {/* Conditional rendering is safer than require() as it prevents build-time resolution errors if the asset is missing */}
+                            {selectedAnimal?.image_url ? (
+                                <Image 
+                                    source={{ uri: selectedAnimal.image_url }} 
+                                    style={styles.popupImage}
+                                    resizeMode="cover"
+                                />
+                            ) : (
+                                <View style={styles.imagePlaceholder}>
+                                    <Text style={styles.placeholderEmoji}>📷</Text>
+                                    <Text style={styles.placeholderText}>No image available</Text>
+                                </View>
+                            )}
+                            
+                            <View style={styles.popupInfo}>
+                                <Text style={styles.popupAnimalName}>🐾 {selectedAnimal?.name}</Text>
+                                
+                                <View style={styles.popupMetaRow}>
+                                    <Text style={styles.popupMetaLabel}>📅 Last observed:</Text>
+                                    <Text style={styles.popupMetaValue}>{selectedAnimal?.date}</Text>
+                                </View>
+
+                                <View style={styles.popupMetaRow}>
+                                    <Text style={styles.popupMetaLabel}>📍 Confidence:</Text>
+                                    <View style={[
+                                        styles.confidenceBadge, 
+                                        selectedAnimal?.metadata?.confidence === 'high' ? styles.confidenceHigh :
+                                        selectedAnimal?.metadata?.confidence === 'medium' ? styles.confidenceMedium : styles.confidenceLow
+                                    ]}>
+                                        <Text style={styles.confidenceText}>{selectedAnimal?.metadata?.confidence || 'medium'}</Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.popupMetaRow}>
+                                    <Text style={styles.popupMetaLabel}>🌍 Data scope:</Text>
+                                    <Text style={styles.popupMetaValue}>{selectedAnimal?.metadata?.scope || 'regional'}</Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        <TouchableOpacity 
+                            style={styles.popupCloseButton} 
+                            onPress={() => setSelectedAnimal(null)}
+                        >
+                            <Text style={styles.popupCloseButtonText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
         </View>
     );
 };
@@ -678,6 +876,27 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#ffffff',
     },
+    noWildlifeContainer: {
+        position: 'absolute',
+        top: 100,
+        alignSelf: 'center',
+        backgroundColor: '#ffffff',
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
+        zIndex: 100,
+        pointerEvents: 'none',
+    },
+    noWildlifeText: {
+        color: '#6b7280',
+        fontWeight: '600',
+        fontSize: 14,
+    },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -765,20 +984,41 @@ const styles = StyleSheet.create({
     animalEmoji: {
         fontSize: 32,
     },
-    safePlaceMarker: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: '#ffffff',
+    customCallout: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        padding: 12,
+        width: 200,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
     },
-    policeMarker: {
-        backgroundColor: '#2563eb',
+    calloutTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#1f2937',
+        marginBottom: 4,
     },
-    rangerMarker: {
-        backgroundColor: '#16a34a',
+    calloutType: {
+        fontSize: 14,
+        color: '#6b7280',
+        marginBottom: 8,
+    },
+    calloutDetail: {
+        fontSize: 12,
+        color: '#4b5563',
+    },
+    calloutImage: {
+        width: 150,
+        height: 100,
+        marginTop: 8,
+        marginBottom: 8,
+        borderRadius: 8,
+        backgroundColor: '#f3f4f6', // Placeholder color while loading
     },
     playButton: {
         position: 'absolute',
@@ -798,46 +1038,50 @@ const styles = StyleSheet.create({
     },
     navigationPanel: {
         position: 'absolute',
-        bottom: 16,
-        left: 16,
-        right: 16,
+        bottom: 20,
+        left: 20,
+        right: 20,
         backgroundColor: '#ffffff',
-        borderRadius: 12,
-        padding: 16,
+        borderRadius: 16,
+        padding: 20,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 5,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        elevation: 8,
     },
     navigationStats: {
         flex: 1,
+        paddingRight: 16,
     },
     etaText: {
-        fontSize: 32,
+        fontSize: 28,
         fontWeight: 'bold',
         color: '#1f2937',
-    },
-    etaUnit: {
-        fontSize: 20,
-        fontWeight: '500',
+        letterSpacing: -0.5,
     },
     distanceText: {
-        fontSize: 14,
+        fontSize: 15,
         color: '#6b7280',
         fontWeight: '600',
-        marginTop: 4,
+        marginTop: 2,
+        textTransform: 'lowercase',
     },
     stopButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 52,
+        height: 52,
+        borderRadius: 26,
         backgroundColor: '#dc2626',
         alignItems: 'center',
         justifyContent: 'center',
+        shadowColor: '#dc2626',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.4,
+        shadowRadius: 4,
+        elevation: 4,
     },
     footer: {
         padding: 16,
@@ -963,20 +1207,32 @@ const styles = StyleSheet.create({
         color: '#1f2937',
     },
     routeSummaryStats: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
+        flexDirection: 'column',
         backgroundColor: '#f9fafb',
-        borderRadius: 8,
+        borderRadius: 12,
         padding: 16,
         marginBottom: 16,
+        gap: 16,
+    },
+    routeStatGroup: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+    },
+    routeStatDivider: {
+        height: 1,
+        backgroundColor: '#e5e7eb',
+        marginHorizontal: 8,
     },
     routeStat: {
         alignItems: 'center',
+        flex: 1,
     },
     routeStatValue: {
-        fontSize: 24,
+        fontSize: 20,
         fontWeight: 'bold',
         color: '#1f2937',
+        textAlign: 'center',
     },
     riskValue: {
         color: '#ef4444',
@@ -985,9 +1241,11 @@ const styles = StyleSheet.create({
         color: '#2563eb',
     },
     routeStatLabel: {
-        fontSize: 10,
+        fontSize: 11,
         color: '#6b7280',
+        fontWeight: '600',
         marginTop: 4,
+        letterSpacing: 0.5,
     },
     startNavigationButton: {
         backgroundColor: '#10b981',
@@ -1123,6 +1381,116 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         color: '#dc2626',
+    },
+    animalDetailPopup: {
+        width: Dimensions.get('window').width * 0.85,
+        backgroundColor: '#ffffff',
+        borderRadius: 20,
+        padding: 20,
+        alignSelf: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    popupHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 15,
+    },
+    popupTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#6b7280',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+    },
+    popupContent: {
+        flexDirection: 'column',
+    },
+    popupImage: {
+        width: '100%',
+        height: 180,
+        borderRadius: 12,
+        marginBottom: 15,
+        backgroundColor: '#f3f4f6',
+    },
+    imagePlaceholder: {
+        width: '100%',
+        height: 180,
+        borderRadius: 12,
+        marginBottom: 15,
+        backgroundColor: '#f3f4f6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        borderStyle: 'dashed',
+    },
+    placeholderEmoji: {
+        fontSize: 32,
+        marginBottom: 8,
+    },
+    placeholderText: {
+        fontSize: 14,
+        color: '#9ca3af',
+        fontWeight: '500',
+    },
+    popupInfo: {
+        gap: 8,
+    },
+    popupAnimalName: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#1f2937',
+        marginBottom: 10,
+    },
+    popupMetaRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    popupMetaLabel: {
+        fontSize: 14,
+        color: '#6b7280',
+    },
+    popupMetaValue: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#374151',
+    },
+    confidenceBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    confidenceHigh: {
+        backgroundColor: '#d1fae5',
+    },
+    confidenceMedium: {
+        backgroundColor: '#fef3c7',
+    },
+    confidenceLow: {
+        backgroundColor: '#fee2e2',
+    },
+    confidenceText: {
+        fontSize: 12,
+        fontWeight: '600',
+        textTransform: 'capitalize',
+    },
+    popupCloseButton: {
+        marginTop: 20,
+        backgroundColor: '#1f2937',
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
+    popupCloseButtonText: {
+        color: '#ffffff',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
 
