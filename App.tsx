@@ -25,7 +25,8 @@ const AppContent: React.FC = () => {
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,
-        backendReady, backendError
+        backendReady, backendError,
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
     } = useAnimalData();
     
     const { 
@@ -115,6 +116,10 @@ const AppContent: React.FC = () => {
                         onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}
                         nearbyRadiusKm={nearbyRadius}
                         isApproachingStart={isApproachingStart}
+                        recentSightings={recentSightings}
+                        isWildlifeLoading={isWildlifeLoading}
+                        isLocationLoading={isLocationLoading}
+                        isRouteLoading={isRouteLoading}
                     />;
             case View.GUIDE: return <GuideView />;
             case View.REPORTS: return <ReportsView reports={reports} onAddReport={addReport} />;

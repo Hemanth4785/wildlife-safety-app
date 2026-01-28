@@ -1,0 +1,1 @@
+{"per_animal": ["distance_km", "hour_of_day", "confidence_encoded", "scope_encoded"], "generic": ["animal_encoded", "distance_km", "hour_of_day", "confidence_encoded", "scope_encoded"]}
