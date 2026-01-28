@@ -47,6 +47,10 @@ interface MapViewProps {
     onPause: () => void;
     nearbyRadiusKm: number;
     isApproachingStart: boolean;
+    recentSightings: any[];
+    isWildlifeLoading: boolean;
+    isLocationLoading: boolean;
+    isRouteLoading: boolean;
 }
 
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
@@ -56,7 +60,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
         isPlaying, onPlay, onPause, isApproachingStart,
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
-        isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation
+        isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation,
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
     } = props;
     
     const mapRef = useRef<MapView>(null);
@@ -71,24 +76,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', true);
     const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
     const [showWeatherOverlay, setShowWeatherOverlay] = useLocalStorage<boolean>('map-filter-weather', false);
-
-    const [recentSightings, setRecentSightings] = useState<any[]>([]);
-    const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
-
-    useEffect(() => {
-        let mounted = true;
-        const load = async () => {
-            setIsWildlifeLoading(true);
-            try {
-                const data = await api.fetchRecentWildlife();
-                if (mounted) setRecentSightings(data);
-            } finally {
-                if (mounted) setIsWildlifeLoading(false);
-            }
-        };
-        load();
-        return () => { mounted = false; };
-    }, []);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
 
@@ -590,6 +577,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 onClearSuggestions={onClearSuggestions}
                 getCurrentLocation={getCurrentLocation}
                 nearbyRadiusKm={nearbyRadiusKm}
+                isLocationLoading={isLocationLoading}
+                isRouteLoading={isRouteLoading}
             />
 
             {detailModalAnimal && (
@@ -683,19 +672,20 @@ interface RoutePlannerSheetProps {
     onClearSuggestions: () => void;
     getCurrentLocation: () => Promise<Location>;
     nearbyRadiusKm: number;
+    isLocationLoading: boolean;
+    isRouteLoading: boolean;
 }
 
 const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
     isOpen, onClose, onCalculateSafeRoute, routeStatus, routeMessage,
     suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions,
-    getCurrentLocation, nearbyRadiusKm
+    getCurrentLocation, nearbyRadiusKm, isLocationLoading, isRouteLoading
 }) => {
     const [startQuery, setStartQuery] = useState('');
     const [destQuery, setDestQuery] = useState('');
     const [selectedStart, setSelectedStart] = useState<Location | null>(null);
     const [selectedDest, setSelectedDest] = useState<Location | null>(null);
     const [activeInput, setActiveInput] = useState<'start' | 'dest' | null>(null);
-    const [isGettingLocation, setIsGettingLocation] = useState(false);
     const [localError, setLocalError] = useState('');
     const [travelMode, setTravelMode] = useState<TravelMode>('car');
 
@@ -707,7 +697,6 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
     ];
 
     const handleUseMyLocation = async () => {
-        setIsGettingLocation(true);
         onClearSuggestions();
         try {
             const location = await getCurrentLocation();
@@ -716,8 +705,6 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
         } catch (error: any) {
             // Error already handled by getCurrentLocation
             setStartQuery("Could not fetch location");
-        } finally {
-            setIsGettingLocation(false);
         }
     };
 
@@ -786,9 +773,9 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
                                 <TouchableOpacity
                                     style={styles.locationButton}
                                     onPress={handleUseMyLocation}
-                                    disabled={isGettingLocation}
+                                    disabled={isLocationLoading}
                                 >
-                                    {isGettingLocation ? (
+                                    {isLocationLoading ? (
                                         <SpinnerIcon width={20} height={20} color="#374151" />
                                     ) : (
                                         <LocationMarkerIcon width={20} height={20} color="#374151" />
@@ -850,12 +837,12 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
                             ))}
                         </View>
                         <TouchableOpacity
-                            style={[styles.submitButton, routeStatus === AppState.LOADING && styles.submitButtonDisabled]}
+                            style={[styles.submitButton, isRouteLoading && styles.submitButtonDisabled]}
                             onPress={handleSubmit}
-                            disabled={routeStatus === AppState.LOADING}
+                            disabled={isRouteLoading}
                         >
                             <Text style={styles.submitButtonText}>
-                                {routeStatus === AppState.LOADING ? 'Calculating...' : 'Find Safe Route'}
+                                {isRouteLoading ? 'Calculating...' : 'Find Safe Route'}
                             </Text>
                         </TouchableOpacity>
                         {(localError || (routeStatus === AppState.ERROR && routeMessage)) && (

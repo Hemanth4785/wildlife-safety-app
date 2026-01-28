@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawnSync } from 'child_process';
+import { spawnSync, execFile } from 'child_process';
 
 dotenv.config();
 
@@ -14,6 +14,8 @@ console.log("Server file loaded");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_inat_recent.py');
 const WILDLIFE_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'inat_live.json');
+const ML_PREDICT_SCRIPT = path.resolve(__dirname, '..', 'ml', 'predict_risk.py');
+const ML_PYTHON_EXE = process.platform === 'win32' ? 'python.exe' : 'python3';
 
 // --- Constants ---
 const SPECIES_CONFIG = {
@@ -425,6 +427,63 @@ app.get('/api/weather', async (req, res) => {
         console.error('Weather API error:', error.message);
         res.status(502).json({ error: 'Weather service unavailable' });
     }
+});
+
+// --- ML Risk Prediction Endpoint ---
+app.post('/api/predict-risk', (req, res) => {
+    const { animal, distance_km, confidence, scope, eventDate } = req.body;
+
+    if (!animal || distance_km === undefined) {
+        return res.status(400).json({ error: 'Missing animal or distance_km' });
+    }
+
+    const inputData = {
+        animal,
+        distance_km,
+        eventDate: eventDate || new Date().toISOString(),
+        metadata: {
+            confidence: confidence || 'medium',
+            scope: scope || 'regional'
+        }
+    };
+
+    const inputJson = JSON.stringify(inputData);
+    console.log(`[ML] Predicting risk via execFile: ${animal} at ${distance_km}km`);
+
+    // Use execFile to avoid Windows stdin deadlock.
+    // We pass the JSON as a command-line argument.
+    execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, inputJson], {
+        cwd: path.dirname(ML_PREDICT_SCRIPT),
+        timeout: 15000,
+        maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+    }, (error, stdout, stderr) => {
+        // Debug Logging
+        if (error) console.error('[ML Error] Exec Exception:', error.message);
+        if (stderr) console.error('[ML Error] Python Stderr:', stderr);
+        if (stdout) console.log('[ML Output] Raw Stdout:', stdout.substring(0, 100));
+
+        if (error) {
+            const isTimeout = error.killed || error.code === 'ETIMEDOUT';
+            return res.status(500).json({ 
+                error: isTimeout ? 'ML engine timed out' : 'Failed to start ML engine', 
+                details: error.message 
+            });
+        }
+
+        if (!stdout || stdout.trim() === '') {
+            return res.status(500).json({ 
+                error: 'ML engine returned no output'
+            });
+        }
+
+        try {
+            const prediction = JSON.parse(stdout.trim());
+            res.json(prediction);
+        } catch (parseErr) {
+            console.error('[ML Error] JSON Parse Error:', parseErr.message, 'Raw Output:', stdout);
+            res.status(500).json({ error: 'Failed to parse ML output' });
+        }
+    });
 });
 
 const port = process.env.PORT || 3000;

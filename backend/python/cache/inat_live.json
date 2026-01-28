@@ -784,20 +784,6 @@
     }
   },
   {
-    "animal": "Tiger",
-    "scientific_name": "Panthera tigris",
-    "emoji": "\ud83d\udc05",
-    "lat": 11.7459798949,
-    "lon": 76.7230096998,
-    "eventDate": "2025-07-31",
-    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/545394526/medium.jpg",
-    "metadata": {
-      "scope": "regional",
-      "quality_grade": "research",
-      "confidence": "high"
-    }
-  },
-  {
     "animal": "Leopard",
     "scientific_name": "Panthera pardus",
     "emoji": "\ud83d\udc06",
@@ -851,6 +837,20 @@
       "scope": "global",
       "quality_grade": "research",
       "confidence": "medium"
+    }
+  },
+  {
+    "animal": "Gaur",
+    "scientific_name": "Bos gaurus",
+    "emoji": "\ud83e\uddac",
+    "lat": 10.3936724421,
+    "lon": 76.886337669,
+    "eventDate": "2026-01-27",
+    "image_url": "https://static.inaturalist.org/photos/611337578/medium.jpg",
+    "metadata": {
+      "scope": "regional",
+      "quality_grade": "research",
+      "confidence": "high"
     }
   },
   {
@@ -1540,20 +1540,6 @@
     }
   },
   {
-    "animal": "Gaur",
-    "scientific_name": "Bos gaurus",
-    "emoji": "\ud83e\uddac",
-    "lat": 11.8369144005,
-    "lon": 76.3140926634,
-    "eventDate": "2025-10-03",
-    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/575446617/medium.jpg",
-    "metadata": {
-      "scope": "regional",
-      "quality_grade": "research",
-      "confidence": "high"
-    }
-  },
-  {
     "animal": "Sloth Bear",
     "scientific_name": "Melursus ursinus",
     "emoji": "\ud83d\udc3b",
@@ -1743,20 +1729,6 @@
     "lon": 78.8678234604,
     "eventDate": "2025-08-15",
     "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/552749172/medium.jpg",
-    "metadata": {
-      "scope": "regional",
-      "quality_grade": "research",
-      "confidence": "high"
-    }
-  },
-  {
-    "animal": "Sloth Bear",
-    "scientific_name": "Melursus ursinus",
-    "emoji": "\ud83d\udc3b",
-    "lat": 14.7913669128,
-    "lon": 79.2399572391,
-    "eventDate": "2025-07-31",
-    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/545952120/medium.jpg",
     "metadata": {
       "scope": "regional",
       "quality_grade": "research",

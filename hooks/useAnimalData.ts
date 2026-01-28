@@ -64,6 +64,14 @@ export const useAnimalData = () => {
     const [backendReady, setBackendReady] = useState<boolean | null>(null);
     const [backendError, setBackendError] = useState<string | null>(null);
 
+    // --- Wildlife Sightings State (Loaded once on start) ---
+    const [recentSightings, setRecentSightings] = useState<any[]>([]);
+    const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
+
+    // --- Loading States for UX ---
+    const [isLocationLoading, setIsLocationLoading] = useState(false);
+    const [isRouteLoading, setIsRouteLoading] = useState(false);
+
     // --- State for Live Navigation ---
     const [isNavigating, setIsNavigating] = useState(false);
     const [liveLocation, setLiveLocation] = useState<Location | null>(null);
@@ -202,6 +210,7 @@ export const useAnimalData = () => {
 
     const calculateSafeRoute = useCallback(async (start: Location | string, end: Location | string, radius: number, mode: TravelMode, excludedAnimalIds: string[] = []) => {
         setRouteStatus(AppState.LOADING);
+        setIsRouteLoading(true);
         setRouteMessage('Calculating safest route...');
         setSafeRoute(null);
         setSafePlaces([]);
@@ -240,15 +249,18 @@ export const useAnimalData = () => {
                 setRiskySegments(riskData.riskySegments);
                 
                 setRouteStatus(AppState.SUCCESS);
+                setIsRouteLoading(false);
                 setRouteMessage('Safe route found!');
                 return route;
             } else {
                 setRouteStatus(AppState.ERROR);
+                setIsRouteLoading(false);
                 setRouteMessage('Safe route unavailable, try again');
                 return null;
             }
         } catch (error: any) {
             setRouteStatus(AppState.ERROR);
+            setIsRouteLoading(false);
             setRouteMessage(error.message || 'Failed to calculate route.');
             return null;
         }
@@ -272,9 +284,11 @@ export const useAnimalData = () => {
     const clearSuggestions = useCallback(() => setSuggestions([]), []);
 
     const getCurrentLocation = useCallback(async (): Promise<Location> => {
+        setIsLocationLoading(true);
         const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
 
         if (status !== 'granted') {
+            setIsLocationLoading(false);
             const error: any = new Error('Location permission was denied');
             error.code = 'LOCATION_PERMISSION_DENIED';
             throw error;
@@ -286,8 +300,10 @@ export const useAnimalData = () => {
             });
             const { latitude, longitude } = position.coords;
             const name = await api.reverseGeocode(latitude, longitude);
+            setIsLocationLoading(false);
             return { lat: latitude, lon: longitude, name };
         } catch (error: any) {
+            setIsLocationLoading(false);
             logger.error("Geolocation error", error);
             throw new Error("Could not get current location. Please check your device's permissions.");
         }
@@ -303,6 +319,18 @@ export const useAnimalData = () => {
                 } else {
                     setBackendReady(true);
                     setBackendError(null);
+                    
+                    // Fetch wildlife sightings only after backend is confirmed ready
+                    // and only load once on app start.
+                    try {
+                        setIsWildlifeLoading(true);
+                        const data = await api.fetchRecentWildlife();
+                        setRecentSightings(data);
+                    } catch (err) {
+                        logger.error('Failed to fetch initial wildlife sightings', err);
+                    } finally {
+                        setIsWildlifeLoading(false);
+                    }
                 }
             } catch (error) {
                 logger.error('Backend health check failed', error);
@@ -487,6 +515,7 @@ export const useAnimalData = () => {
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,
-        backendReady, backendError
+        backendReady, backendError,
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
     };
 };
