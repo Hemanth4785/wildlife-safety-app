@@ -1,24 +1,29 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 
-interface LoginViewProps {
-    onLogin: (email: string, pass: string) => Promise<string | null>;
-    onSwitchToSignup: () => void;
+interface RegisterViewProps {
+    onSignup: (name: string, email: string, pass: string) => Promise<string | null>;
+    onSwitchToLogin: () => void;
 }
 
-const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: LoginViewProps) => {
+const RegisterView: React.FC<RegisterViewProps> = ({ onSignup, onSwitchToLogin }: RegisterViewProps) => {
+    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
     const validate = () => {
-        if (!email || !password) {
-            setError('Email and password are required.');
+        if (!name || !email || !password) {
+            setError('All fields are required.');
             return false;
         }
         if (!/\S+@\S+\.\S+/.test(email)) {
             setError('Please enter a valid email address.');
+            return false;
+        }
+        if (password.length < 6) {
+            setError('Password must be at least 6 characters.');
             return false;
         }
         return true;
@@ -30,15 +35,14 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
         
         setIsLoading(true);
         try {
-            const result = await onLogin(email, password);
+            const result = await onSignup(name, email, password);
             if (result) {
-                // Map Firebase error codes to user-friendly messages
-                if (result.includes('auth/user-not-found') || result.includes('auth/invalid-credential')) {
-                    setError('Invalid email or password.');
-                } else if (result.includes('auth/wrong-password')) {
-                    setError('Incorrect password. Please try again.');
-                } else if (result.includes('auth/too-many-requests')) {
-                    setError('Too many failed attempts. Please try again later.');
+                if (result.includes('auth/email-already-in-use')) {
+                    setError('An account already exists with this email.');
+                } else if (result.includes('auth/invalid-email')) {
+                    setError('Invalid email address.');
+                } else if (result.includes('auth/weak-password')) {
+                    setError('Password is too weak.');
                 } else {
                     setError(result);
                 }
@@ -62,11 +66,20 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
                 <View style={styles.card}>
                     <View style={styles.header}>
                         <Text style={{ fontSize: 48 }}>🛡️</Text>
-                        <Text style={styles.title}>Welcome Back</Text>
-                        <Text style={styles.subtitle}>Sign in to continue to Wildlife Safety</Text>
+                        <Text style={styles.title}>Create Account</Text>
+                        <Text style={styles.subtitle}>Join to start your safety journey</Text>
                     </View>
                     
                     <View style={styles.form}>
+                        <View style={styles.inputContainer}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Full Name"
+                                value={name}
+                                onChangeText={setName}
+                                autoCapitalize="words"
+                            />
+                        </View>
                         <View style={styles.inputContainer}>
                             <TextInput
                                 style={styles.input}
@@ -85,7 +98,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
                                 value={password}
                                 onChangeText={setPassword}
                                 secureTextEntry
-                                autoComplete="password"
+                                autoComplete="password-new"
                             />
                         </View>
                         
@@ -99,15 +112,15 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
                             {isLoading ? (
                                 <ActivityIndicator color="#ffffff" />
                             ) : (
-                                <Text style={styles.buttonText}>Sign in</Text>
+                                <Text style={styles.buttonText}>Create Account</Text>
                             )}
                         </TouchableOpacity>
                     </View>
                     
                     <View style={styles.footer}>
-                        <Text style={styles.footerText}>Don't have an account? </Text>
-                        <TouchableOpacity onPress={onSwitchToSignup}>
-                            <Text style={styles.footerLink}>Sign up</Text>
+                        <Text style={styles.footerText}>Already have an account? </Text>
+                        <TouchableOpacity onPress={onSwitchToLogin}>
+                            <Text style={styles.footerLink}>Sign in</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -208,16 +221,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#059669',
     },
-    demoText: {
-        marginTop: 16,
-        fontSize: 12,
-        color: '#9ca3af',
-        textAlign: 'center',
-        paddingHorizontal: 16,
-    },
-    demoBold: {
-        fontWeight: 'bold',
-    },
 });
 
-export default LoginView;
+export default RegisterView;

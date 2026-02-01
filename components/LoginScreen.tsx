@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 
-interface LoginViewProps {
+interface LoginScreenProps {
     onLogin: (email: string, pass: string) => Promise<string | null>;
     onSwitchToSignup: () => void;
 }
 
-const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: LoginViewProps) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSwitchToSignup }: LoginScreenProps) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -32,7 +32,6 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
         try {
             const result = await onLogin(email, password);
             if (result) {
-                // Map Firebase error codes to user-friendly messages
                 if (result.includes('auth/user-not-found') || result.includes('auth/invalid-credential')) {
                     setError('Invalid email or password.');
                 } else if (result.includes('auth/wrong-password')) {
@@ -208,16 +207,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#059669',
     },
-    demoText: {
-        marginTop: 16,
-        fontSize: 12,
-        color: '#9ca3af',
-        textAlign: 'center',
-        paddingHorizontal: 16,
-    },
-    demoBold: {
-        fontWeight: 'bold',
-    },
 });
 
-export default LoginView;
+export default LoginScreen;

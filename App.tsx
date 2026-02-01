@@ -9,14 +9,34 @@ import GuideView from './components/GuideView';
 import ReportsView from './components/ReportsView';
 import ProfileView from './components/ProfileView';
 import BottomNav from './components/BottomNav';
-import LoginView from './components/LoginView';
+import LoginScreen from './components/LoginScreen';
+import RegisterScreen from './components/RegisterScreen';
 import OnboardingGuide from './components/OnboardingGuide';
 import Dashboard from './components/Dashboard';
 import { AppProvider, useAppContext } from './contexts/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
+import { auth, db } from "./services/firebase";
+
+console.log("Firebase connected:", auth.app.name);
+console.log("Firestore initialized:", db.type === 'firestore' ? 'Yes' : 'No');
 
 const AppContent: React.FC = () => {
+    const { 
+        user, 
+        reports, 
+        isLoading, 
+        showOnboarding, 
+        login, 
+        signup, 
+        logout, 
+        updateUser, 
+        setUser,
+        setIsLoading,
+        closeOnboarding, 
+        addReport 
+    } = useAppContext();
+
     const { 
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
@@ -27,32 +47,12 @@ const AppContent: React.FC = () => {
         weather, isApproachingStart,
         backendReady, backendError,
         recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
-    } = useAnimalData();
-    
-    const { 
-        user, 
-        reports, 
-        isLoading, 
-        showOnboarding, 
-        login, 
-        signup, 
-        logout, 
-        updateUser, 
-        closeOnboarding, 
-        addReport 
-    } = useAppContext();
+    } = useAnimalData(!!user);
     
     const [currentView, setCurrentView] = useState(View.HOME);
+    const [authScreen, setAuthScreen] = useState<'login' | 'signup'>('login');
     const [animationProgress, setAnimationProgress] = useState(0);
     const [isPlaying, setIsPlaying] = useState(true);
-
-    const handleAuth = useCallback(async (mode: 'login' | 'signup', name: string, email: string, pass: string): Promise<string | null> => {
-        if (mode === 'login') {
-            return await login(email, pass);
-        } else {
-            return await signup(name, email, pass);
-        }
-    }, [login, signup]);
 
     const handleLogout = useCallback(async () => {
         await logout();
@@ -78,15 +78,30 @@ const AppContent: React.FC = () => {
         setCurrentView(view);
     };
 
-    if (isLoading || backendReady === null) {
-        return <LoadingScreen message="Initializing app..." />;
+    // 1. Wait for Auth to initialize
+    if (isLoading) {
+        return <LoadingScreen message="Checking authentication..." />;
+    }
+
+    // 2. If no user, show Auth screens (Login/Signup)
+    // We don't need backendReady for this.
+    if (!user) {
+        if (authScreen === 'login') {
+            return <LoginScreen onLogin={login} onSwitchToSignup={() => setAuthScreen('signup')} />;
+        } else {
+            return <RegisterScreen onSignup={signup} onSwitchToLogin={() => setAuthScreen('login')} />;
+        }
+    }
+
+    // 3. User is logged in. Now we wait for Backend check.
+    if (backendReady === null) {
+        return <LoadingScreen message="Connecting to backend..." />;
     }
 
     if (backendReady === false) {
         return <LoadingScreen message={backendError || "Backend is not reachable. Please start the backend server and try again."} />;
     }
-
-    if (!user) return <LoginView onAuth={handleAuth} />;
+    
     if (showOnboarding) return <OnboardingGuide onClose={closeOnboarding} />;
 
     const renderView = () => {

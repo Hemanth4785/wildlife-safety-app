@@ -3,14 +3,16 @@
  * Reduces prop drilling and provides clean data flow
  */
 import React, { createContext, useContext, useCallback, useState, useEffect, ReactNode } from 'react';
-import { User, Report } from '../types';
+import { User as AppUser, Report } from '../types';
 import { storage } from '../utils/storage';
-import { secureSetItem, secureRemoveItem } from '../utils/secureStorage';
 import { logger } from '../utils/logger';
 import { NEARBY_KM } from '../constants';
+import * as authService from '../services/authService';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
 
 interface AppState {
-  user: User | null;
+  user: AppUser | null;
   reports: Report[];
   isLoading: boolean;
   showOnboarding: boolean;
@@ -21,7 +23,9 @@ interface AppContextValue extends AppState {
   login: (email: string, password: string) => Promise<string | null>;
   signup: (name: string, email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
-  updateUser: (user: User) => Promise<void>;
+  updateUser: (user: AppUser) => Promise<void>;
+  setUser: (user: AppUser | null) => void;
+  setIsLoading: (isLoading: boolean) => void;
   closeOnboarding: () => Promise<void>;
   
   // Report actions
@@ -46,7 +50,7 @@ interface AppProviderProps {
 }
 
 export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [reports, setReports] = useState<Report[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -55,19 +59,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const initializeApp = useCallback(async () => {
     try {
       setIsLoading(true);
-
-      // Load saved session
-      const savedSession = await storage.getItem<User>('wildlife-app-session');
-      if (savedSession) {
-        const loadedUser = savedSession;
-        if (typeof loadedUser.nearbyRadiusKm === 'undefined') {
-          loadedUser.nearbyRadiusKm = NEARBY_KM;
-        }
-        setUser(loadedUser);
-        if (loadedUser.isNewUser) {
-          setShowOnboarding(true);
-        }
-      }
 
       // Load reports
       const savedReports = await storage.getItem<Report[]>('reports');
@@ -85,84 +76,60 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     initializeApp();
   }, [initializeApp]);
 
+  // Auth state listener
+  useEffect(() => {
+    const unsubscribe = authService.subscribeToAuthChanges(async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Load Firestore profile
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        if (userDoc.exists()) {
+          setUser(userDoc.data() as AppUser);
+          setShowOnboarding(userDoc.data().isNewUser ?? false);
+        }
+      } catch (error) {
+        logger.error('Failed to load user profile', error);
+      } finally {
+        setIsLoading(false);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
   // Login user
   const login = useCallback(async (email: string, password: string): Promise<string | null> => {
-    try {
-      const normalizedEmail = email.toLowerCase();
-      const userData = await storage.getItem<User>(`user-${normalizedEmail}`);
-      if (!userData) {
-        return 'Could not find user data. Please sign up again.';
-      }
-
-      if (typeof userData.nearbyRadiusKm === 'undefined') {
-        userData.nearbyRadiusKm = NEARBY_KM;
-      }
-
-      setUser(userData);
-      await storage.setItem('wildlife-app-session', userData);
-      await secureSetItem('session-user', normalizedEmail);
-      
-      if (userData.isNewUser) {
-        setShowOnboarding(true);
-      }
-
-      return null;
-    } catch (error) {
-      logger.error('Login error', error);
-      return 'An error occurred during login. Please try again.';
-    }
+    const { user: firebaseUser, error } = await authService.loginUser(email, password);
+    if (error) return error;
+    return null;
   }, []);
 
   // Sign up new user
   const signup = useCallback(async (name: string, email: string, password: string): Promise<string | null> => {
-    try {
-      const normalizedEmail = email.toLowerCase();
-
-      const existingUser = await storage.getItem<User>(`user-${normalizedEmail}`);
-      if (existingUser) {
-        return 'An account with this email already exists.';
-      }
-
-      const newUser: User = {
-        name,
-        email: normalizedEmail,
-        avatarId: 'tiger',
-        nearbyRadiusKm: NEARBY_KM,
-        isNewUser: true,
-      };
-
-      await storage.setItem(`user-${normalizedEmail}`, newUser);
-
-      // Set as current user
-      setUser(newUser);
-      await storage.setItem('wildlife-app-session', newUser);
-      await secureSetItem('session-user', normalizedEmail);
-      setShowOnboarding(true);
-
-      return null;
-    } catch (error) {
-      logger.error('Signup error', error);
-      return 'An error occurred during signup. Please try again.';
-    }
+    const { user: firebaseUser, error } = await authService.registerUser(email, password, name);
+    if (error) return error;
+    return null;
   }, []);
 
   // Logout user
   const logout = useCallback(async () => {
-    try {
-      setUser(null);
-      await storage.removeItem('wildlife-app-session');
-       await secureRemoveItem('session-user');
-    } catch (error) {
-      logger.error('Logout error', error);
-    }
+    await authService.logoutUser();
   }, []);
 
   // Update user data
-  const updateUser = useCallback(async (updatedUser: User) => {
+  const updateUser = useCallback(async (updatedUser: AppUser) => {
     try {
       setUser(updatedUser);
-      await storage.setItem('wildlife-app-session', updatedUser);
-      await storage.setItem(`user-${updatedUser.email.toLowerCase()}`, updatedUser);
+      if (updatedUser.uid) {
+        await setDoc(doc(db, 'users', updatedUser.uid), {
+          ...updatedUser
+        }, { merge: true });
+      }
     } catch (error) {
       logger.error('Update user error', error);
     }
@@ -204,6 +171,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     signup,
     logout,
     updateUser,
+    setUser,
+    setIsLoading,
     closeOnboarding,
     addReport,
     initializeApp,

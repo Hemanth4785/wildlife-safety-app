@@ -44,7 +44,7 @@ const useLocalStorage = <T,>(key: string, initialValue: T): [T, (value: T | ((va
 const DEVIATION_THRESHOLD_KM = 0.1; // 100 meters
 const REROUTE_COOLDOWN_MS = 15000; // 15 seconds
 
-export const useAnimalData = () => {
+export const useAnimalData = (shouldFetch: boolean = false) => {
     const [status, setStatus] = useState<AppState>(AppState.IDLE);
     const [message, setMessage] = useState('');
     const [userLocation, setUserLocation] = useState<Location | null>(null);
@@ -310,6 +310,15 @@ export const useAnimalData = () => {
     }, []);
     
     useEffect(() => {
+        if (!shouldFetch) {
+            setBackendReady(null);
+            setBackendError(null);
+        }
+    }, [shouldFetch]);
+
+    useEffect(() => {
+        if (!shouldFetch) return;
+
         const checkBackend = async () => {
             try {
                 const ok = await api.checkBackendHealth();
@@ -339,9 +348,11 @@ export const useAnimalData = () => {
             }
         };
         checkBackend();
-    }, []);
+    }, [shouldFetch]);
 
     useEffect(() => {
+        if (!shouldFetch) return;
+
         const fetchInitialData = async () => {
             try {
                 setStatus(AppState.LOADING);
@@ -360,7 +371,7 @@ export const useAnimalData = () => {
         };
 
         fetchInitialData();
-    }, [getCurrentLocation]);
+    }, [shouldFetch, getCurrentLocation]);
     
     const clearNavigationAlert = useCallback(() => setNavigationAlert(null), []);
 

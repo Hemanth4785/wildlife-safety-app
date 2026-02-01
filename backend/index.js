@@ -6,8 +6,30 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync, execFile } from 'child_process';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, doc, setDoc } from 'firebase/firestore';
 
 dotenv.config();
+
+const firebaseConfig = {
+    apiKey: process.env.FIREBASE_API_KEY,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
+};
+
+let db;
+try {
+    const firebaseApp = initializeApp(firebaseConfig);
+    db = getFirestore(firebaseApp);
+    console.log("Firebase initialized successfully");
+} catch (error) {
+    console.error("Firebase initialization failed:", error.message);
+}
+
 
 const app = express();
 console.log("Server file loaded");
@@ -22,6 +44,14 @@ const ML_MOVEMENT_SCRIPT = path.join(ML_DIR, 'predict_movement.py');
 const ML_PYTHON_EXE = process.platform === 'win32' 
     ? path.resolve(__dirname, '..', 'lstm_env', 'Scripts', 'python.exe') 
     : path.resolve(__dirname, '..', 'lstm_env', 'bin', 'python3');
+
+const INAT_PYTHON_EXE = (() => {
+    if (process.platform === 'win32') {
+        const winPath = path.resolve(__dirname, '..', 'gbif_env', 'Scripts', 'python.exe');
+        return fs.existsSync(winPath) ? winPath : 'python';
+    }
+    return 'python3';
+})();
 
 // --- Constants ---
 const SPECIES_CONFIG = {
@@ -143,8 +173,7 @@ const getWildlifeData = () => {
 };
 
 const runInatPython = () => {
-    const py = process.platform === 'win32' ? 'python' : 'python3';
-    const r = spawnSync(py, [PYTHON_SCRIPT], {
+    const r = spawnSync(INAT_PYTHON_EXE, [PYTHON_SCRIPT], {
         cwd: path.dirname(PYTHON_SCRIPT),
         encoding: 'utf8',
         timeout: 60000,
@@ -160,9 +189,41 @@ const runInatPython = () => {
     return true;
 };
 
+const syncSightingsToFirestore = async (sightings) => {
+    if (!db) {
+        console.warn("Skipping Firestore sync: DB not initialized");
+        return;
+    }
+    console.log(`[Sync] Starting sync for ${sightings.length} records...`);
+    let count = 0;
+    for (const animal of sightings) {
+        // Fallback if ID is missing (legacy cache might not have it)
+        const docId = animal.id ? String(animal.id) : `${animal.scientific_name}_${animal.lat}_${animal.lon}`;
+        
+        try {
+            const docRef = doc(db, 'animal_sightings', docId);
+            
+            // Map eventDate to generated_at for sorting compatibility
+            const generatedAt = animal.eventDate ? new Date(animal.eventDate).toISOString() : new Date().toISOString();
+            
+            await setDoc(docRef, {
+                ...animal,
+                generated_at: generatedAt,
+                synced_at: new Date().toISOString()
+            }, { merge: true });
+            count++;
+        } catch (err) {
+            console.error(`[Sync] Failed to sync animal ${docId}:`, err.message);
+        }
+    }
+    console.log(`[Sync] Successfully synced ${count} documents.`);
+};
+
 app.get(['/api/wildlife/recent', '/api/inat/recent', '/api/gbif/recent'], (req, res) => {
     if (runInatPython()) {
         const fresh = getWildlifeData();
+        // Fire-and-forget sync to avoid blocking the response
+        syncSightingsToFirestore(fresh).catch(err => console.error("Sync error:", err));
         return res.json(fresh);
     }
     const cached = getWildlifeData();
@@ -274,15 +335,48 @@ app.post('/api/animals/near-route', (req, res) => {
     });
 });
 
+// --- Internal Geocoding Helper ---
+const safeReverseGeocode = async (lat, lon) => {
+  const latKey = parseFloat(lat).toFixed(4);
+  const lonKey = parseFloat(lon).toFixed(4);
+  const key = `${latKey},${lonKey}`;
+
+  if (geocodeCache.has(key)) {
+    return geocodeCache.get(key).display_name;
+  }
+
+  try {
+    const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+      params: { lat, lon, format: 'json', zoom: 18, addressdetails: 1 },
+      headers: { 
+        'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
+        'Referer': 'http://localhost' 
+      },
+      timeout: 5000 // 5s timeout as requested
+    });
+    
+    if (response.data && response.data.display_name) {
+      geocodeCache.set(key, response.data);
+      return response.data.display_name;
+    }
+    return `Unknown forest area near (${latKey}, ${lonKey})`;
+  } catch (error) {
+    console.error('[InternalGeocode] Failed:', error.message);
+    return `Unknown forest area near (${latKey}, ${lonKey})`;
+  }
+};
+
 // --- Nominatim search proxy (frontend must never call Nominatim directly) ---
 const searchCache = new Map();
 app.get('/api/search-locations', async (req, res) => {
     const q = req.query.q;
     if (!q || typeof q !== 'string') return res.status(400).json({ error: 'Missing q' });
     const key = q.trim().toLowerCase();
+    
     if (searchCache.has(key)) {
         return res.json(searchCache.get(key));
     }
+
     try {
         const r = await axios.get('https://nominatim.openstreetmap.org/search', {
             params: { q, format: 'json', limit: 10 },
@@ -290,23 +384,26 @@ app.get('/api/search-locations', async (req, res) => {
                 'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
                 'Referer': 'http://localhost'
             },
-            timeout: 3000, // Strict 3s timeout
+            timeout: 5000, // 5s timeout as requested
         });
+
         const arr = Array.isArray(r.data) ? r.data : [];
         const out = arr.map((x) => ({
             lat: x.lat,
             lon: x.lon,
             display_name: x.display_name || '',
         }));
+
         searchCache.set(key, out);
         res.json(out);
     } catch (e) {
         console.error('[Search] Geocoding degraded:', e.message);
-        // Never return 502, return empty success with status
-        res.json({ 
+        // Requirement: Return 200 with degraded: true and results: []
+        res.status(200).json({ 
             results: [], 
-            geocode_status: "failed",
-            message: "Search service degraded" 
+            degraded: true, 
+            reason: "Geocoding service unavailable",
+            geocode_status: "failed" // keep for compatibility if needed
         });
     }
 });
@@ -317,39 +414,15 @@ app.get('/api/reverse-geocode', async (req, res) => {
   const { lat, lon } = req.query;
   if (!lat || !lon) return res.status(400).json({ error: 'Missing lat/lon' });
 
-  // Round to 4 decimals (~11m precision) to improve cache hit rate
-  const latKey = parseFloat(lat).toFixed(4);
-  const lonKey = parseFloat(lon).toFixed(4);
-  const key = `${latKey},${lonKey}`;
-
-  if (geocodeCache.has(key)) {
-      console.log('Geocode Cache Hit');
-      return res.json(geocodeCache.get(key));
-  }
-
-  try {
-    const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
-      params: { lat, lon, format: 'json' },
-      headers: { 
-        'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
-        'Referer': 'http://localhost' 
-      },
-      timeout: 3000 // Strict 3s timeout
-    });
-    
-    // Cache it
-    geocodeCache.set(key, response.data);
-    res.json(response.data);
-  } catch (error) {
-    console.error('[ReverseGeocode] Degraded:', error.message);
-    // Graceful fallback
-    res.json({ 
-        display_name: "Unknown forest area", 
-        geocode_status: "failed",
-        lat, 
-        lon 
-    });
-  }
+  const address = await safeReverseGeocode(lat, lon);
+  
+  // Return in the format expected by frontend
+  res.json({ 
+      display_name: address,
+      lat, 
+      lon,
+      geocode_status: address.startsWith('Unknown') ? "failed" : "success"
+  });
 });
 
 // --- Overpass Proxy for Safe Places ---
@@ -591,79 +664,35 @@ app.post('/api/predict-movement', async (req, res) => {
             if (prediction.status === 'failed') {
                 console.warn('[LSTM-Movement] Prediction status failed:', prediction.error);
                 
-                // Fallback: If insufficient history, generate a simple linear path for visualization
-                if (prediction.error.includes('Insufficient path history') && recent_path && recent_path.length > 0) {
-                    const lastPoint = recent_path[recent_path.length - 1];
-                    if (lastPoint[0] !== null && lastPoint[1] !== null) {
-                        const startLat = lastPoint[0];
-                        const startLon = lastPoint[1];
-                        const fallbackPath = [
-                            [startLat + 0.005, startLon + 0.005],
-                            [startLat + 0.010, startLon + 0.010],
-                            [startLat + 0.015, startLon + 0.015]
-                        ];
-                        
-                        prediction.predicted_path = fallbackPath;
-                        prediction.risk_level = "Medium";
-                        prediction.model_used = "linear_fallback";
-                        prediction.status = "success";
-                        prediction.distance_to_user_km = 0.5; // Estimated
-                        prediction.safety_override = false;
-                        
-                        console.log('[LSTM-Movement] Applied linear fallback path due to insufficient history');
-                    }
-                }
-
-                if (prediction.status === 'failed') {
-                    return res.status(200).json({
-                        status: "degraded",
-                        message: `LSTM error: ${prediction.error}`,
-                        animal,
-                        predicted_path: [],
-                        risk_level: "Medium",
-                        safety_override: false,
-                        distance_to_user_km: 0
-                    });
-                }
+                return res.status(200).json({
+                    status: "degraded",
+                    message: `LSTM error: ${prediction.error}`,
+                    animal,
+                    predicted_path: [],
+                    risk_level: prediction.risk_level || "Medium",
+                    safety_override: false,
+                    distance_to_user_km: prediction.distance_to_user_km || 0,
+                    model_used: prediction.model_used || "skipped"
+                });
             }
 
             // Reverse Geocoding for each predicted point
             const enhancedPath = await Promise.all((prediction.predicted_path || []).map(async (point) => {
                 const [lat, lon] = point;
-                const latKey = parseFloat(lat).toFixed(4);
-                const lonKey = parseFloat(lon).toFixed(4);
-                const cacheKey = `${latKey},${lonKey}`;
-
-                let address = 'Unknown forest area (coordinates available)';
-                if (geocodeCache.has(cacheKey)) {
-                    address = geocodeCache.get(cacheKey).display_name;
-                } else {
-                    try {
-                        const geoRes = await axios.get('https://nominatim.openstreetmap.org/reverse', {
-                            params: { lat, lon, format: 'json', zoom: 18, addressdetails: 1 },
-                            headers: { 'User-Agent': 'WildlifeSafetyApp/1.0' },
-                            timeout: 3000 // Reduced timeout to 3s
-                        });
-                        if (geoRes.data && geoRes.data.display_name) {
-                            address = geoRes.data.display_name;
-                            geocodeCache.set(cacheKey, geoRes.data);
-                        }
-                    } catch (geoErr) {
-                        console.warn(`[Movement Enrichment] Geocoding failed for ${lat},${lon}:`, geoErr.message);
-                        // address remains 'Unknown forest area...'
-                    }
-                }
+                const address = await safeReverseGeocode(lat, lon);
                 return { lat, lon, address };
             }));
 
             // Final Response Construction
             res.json({
                 animal: prediction.animal,
-                predicted_path: enhancedPath,
+                risk: prediction.risk_level, // Added risk as alias for risk_level per requirement
                 risk_level: prediction.risk_level,
+                predicted_path: enhancedPath,
                 safety_override: prediction.safety_override,
                 distance_to_user_km: prediction.distance_to_user_km,
                 model_used: prediction.model_used,
+                degraded: prediction.status === 'degraded' || false,
                 status: prediction.status || "success"
             });
 

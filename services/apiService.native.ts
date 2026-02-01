@@ -12,9 +12,15 @@ const getApiBaseUrl = (): string | null => {
 const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, backoff = 2000): Promise<any> => {
     try {
         const response = await fetch(url, options);
-        // Remove 502/504 retry logic as it causes UI instability when external services are down
         if (!response.ok) {
-            throw new Error(`Request failed with status ${response.status}`);
+            // Requirement: Treat errors as degraded success, never throw
+            logger.warn(`API request to ${url} returned status ${response.status}`);
+            return { 
+                status: 'degraded', 
+                error: true, 
+                statusCode: response.status,
+                message: "Service temporarily unavailable" 
+            };
         }
         return await response.json();
     } catch (error: any) {
@@ -23,8 +29,13 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
              await new Promise(resolve => setTimeout(resolve, backoff));
              return nativeFetch(url, options, retries - 1, backoff * 2);
         }
-        logger.error(`Failed to fetch ${url}`, error);
-        throw error;
+        logger.error(`Critical fetch failure for ${url}`, error);
+        // Fallback object instead of throwing
+        return { 
+            status: 'degraded', 
+            error: true, 
+            message: error.message || "Network error" 
+        };
     }
 };
 
@@ -140,7 +151,10 @@ export const checkBackendHealth = async (): Promise<boolean> => {
 
     const url = `${baseUrl}/api/health`;
     try {
-        const response = await nativeFetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const response = await nativeFetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
         return !!response && response.status === 'ok';
     } catch (error) {
         logger.error('Backend health check failed', error);
@@ -156,22 +170,21 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
 
     try {
         const response = await nativeFetch(url);
-        // Handle degraded success response
-        if (response && response.geocode_status === 'failed') {
-            logger.warn("Location search degraded", response.message);
-            return [];
+        
+        // Handle degraded or failed responses from proxy
+        if (!response || response.status === 'degraded' || response.degraded || !Array.isArray(response)) {
+            const reason = response?.reason || response?.message || "Search unavailable";
+            logger.warn("Location search degraded:", reason);
+            return []; // Return empty instead of crashing
         }
-        if (!Array.isArray(response)) {
-            logger.error("Unexpected response format from location search proxy", response);
-            return [];
-        }
+
         return response.map((item: any) => ({
             lat: parseFloat(item.lat),
             lon: parseFloat(item.lon),
             name: item.display_name
         }));
     } catch (error) {
-        logger.error("Failed to search locations", error);
+        logger.error("Unexpected failure in searchLocations", error);
         return [];
     }
 };
@@ -183,10 +196,10 @@ export const reverseGeocode = async (lat: number, lon: number): Promise<string> 
     const url = `${baseUrl}/api/reverse-geocode?lat=${lat}&lon=${lon}`;
     try {
         const response = await nativeFetch(url);
-        // Backend now returns display_name: "Unknown forest area" on failure
+        // Requirement: Treat all errors as success, fallback to safe string
         return response?.display_name || 'Unknown forest area';
     } catch (error: any) {
-        logger.error("Failed to reverse geocode via backend", error);
+        logger.error("Unexpected failure in reverseGeocode", error);
         return 'Unknown forest area';
     }
 };
@@ -235,7 +248,8 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
     const baseUrl = getApiBaseUrl();
 
     if (!baseUrl) {
-        throw new Error('API_BASE_URL is not configured. Please set expo.extra.API_BASE_URL in app.config.js.');
+        logger.error('API_BASE_URL is not configured');
+        return [];
     }
 
     const endpoint = `${baseUrl}/api/predict-animal-paths`;
@@ -283,7 +297,7 @@ export const predictAnimalPaths = async (sightingSets: { scientificName: string,
         return results;
     } catch (error: any) {
         logger.error('Failed to predict animal paths', error);
-        throw new Error(`Failed to predict animal paths: ${error.message}`);
+        return []; // Never throw
     }
 };
 
@@ -302,7 +316,9 @@ export const predictMovement = async (
     risk_level: string, 
     safety_override: boolean,
     distance_to_user_km: number,
-    status?: string
+    status?: string,
+    message?: string,
+    degraded?: boolean
 } | null> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return null;
@@ -323,10 +339,33 @@ export const predictMovement = async (
                 k_future: kFuture
             })
         }, 3); // 3 retries for ML
+
+        if (!response || response.error) {
+            return {
+                animal,
+                predicted_path: [],
+                risk_level: "Medium",
+                safety_override: false,
+                distance_to_user_km: 0,
+                status: 'degraded',
+                degraded: true,
+                message: response?.message || "Prediction engine unavailable"
+            };
+        }
+
         return response;
-    } catch (error) {
-        logger.error("Failed to predict movement after retries", error);
-        return null;
+    } catch (error: any) {
+        logger.error("Failed to predict movement", error);
+        return {
+            animal,
+            predicted_path: [],
+            risk_level: "Medium",
+            safety_override: false,
+            distance_to_user_km: 0,
+            status: 'degraded',
+            degraded: true,
+            message: error.message || "Network failure"
+        };
     }
 };
 

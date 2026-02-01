@@ -86,6 +86,14 @@ export enum View {
     PROFILE = 'profile',
 }
 
+export enum UIMode {
+    MAP = 'MAP',
+    DETAIL = 'DETAIL',
+    PREDICTION = 'PREDICTION',
+    ROUTE_SUMMARY = 'ROUTE_SUMMARY',
+    ROUTE_PLANNER = 'ROUTE_PLANNER',
+}
+
 export interface Report {
     id: number;
     wildlifeType: string;
@@ -95,6 +103,7 @@ export interface Report {
 }
 
 export interface User {
+    uid?: string;
     name: string;
     email: string;
     avatarId: string; // References an ID from the AVATARS constant

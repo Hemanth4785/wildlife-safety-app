@@ -316,7 +316,9 @@ export const predictMovement = async (
     predicted_path: { lat: number, lon: number, address: string }[], 
     risk_level: string, 
     safety_override: boolean,
-    distance_to_user_km: number
+    distance_to_user_km: number,
+    status?: string,
+    message?: string
 } | null> => {
     const baseUrl = getApiBaseUrl();
     const url = `${baseUrl}/api/predict-movement`;

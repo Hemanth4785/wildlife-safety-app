@@ -48,10 +48,18 @@ def prepare_lstm_data(records):
     """
     df = pd.DataFrame(records)
     if 'eventDate' not in df.columns:
-        return {}, None
-        
-    df['eventDate'] = pd.to_datetime(df['eventDate'])
-    df = df.sort_values(['animal', 'eventDate'])
+        return {}, None, {"reason": "missing_eventDate", "animals": {}}
+
+    for col in ("lat", "lon"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df["eventDate"] = pd.to_datetime(df["eventDate"], errors="coerce", utc=True)
+    df = df.dropna(subset=["animal", "lat", "lon", "eventDate"]).copy()
+    if df.empty:
+        return {}, None, {"reason": "no_valid_rows", "animals": {}}
+
+    df = df.sort_values(["animal", "eventDate"])
     
     scaler = MinMaxScaler(feature_range=(0, 1))
     df[['lat_scaled', 'lon_scaled']] = scaler.fit_transform(df[['lat', 'lon']])
@@ -60,9 +68,15 @@ def prepare_lstm_data(records):
     joblib.dump(scaler, SCALER_PATH)
     
     sequences = {}
+    stats = {"reason": None, "animals": {}}
     
     for animal, group in df.groupby('animal'):
-        if len(group) < MIN_SAMPLES_FOR_LSTM:
+        group = group.drop_duplicates(subset=["eventDate", "lat_scaled", "lon_scaled"])
+        total_points = int(len(group))
+        min_required = max(MIN_SAMPLES_FOR_LSTM, WINDOW_SIZE + 1)
+        stats["animals"][animal] = {"points": total_points, "min_required": int(min_required), "sequences": 0}
+
+        if total_points < min_required:
             continue
             
         group_data = group[['lat_scaled', 'lon_scaled']].values
@@ -74,8 +88,12 @@ def prepare_lstm_data(records):
             
         if X_animal:
             sequences[animal] = (np.array(X_animal), np.array(y_animal))
+            stats["animals"][animal]["sequences"] = int(len(X_animal))
             
-    return sequences, scaler
+    if not sequences:
+        stats["reason"] = "insufficient_sequences"
+
+    return sequences, scaler, stats
 
 def build_lstm_model(input_shape):
     """
@@ -101,9 +119,15 @@ def train_lstm_models(records):
     """
     from tensorflow.keras.callbacks import EarlyStopping
     
-    seqs, scaler = prepare_lstm_data(records)
+    seqs, scaler, stats = prepare_lstm_data(records)
     if not seqs:
-        print("Insufficient data for LSTM training.")
+        print("[LSTM] Insufficient data for LSTM training.")
+        if stats and stats.get("reason"):
+            print(f"[LSTM] Skip reason: {stats['reason']}")
+        if stats and stats.get("animals"):
+            top = sorted(stats["animals"].items(), key=lambda kv: kv[1].get("points", 0), reverse=True)[:5]
+            for animal, s in top:
+                print(f"[LSTM] {animal}: points={s.get('points')} sequences={s.get('sequences')} min_required={s.get('min_required')}")
         return []
         
     trained_models = []

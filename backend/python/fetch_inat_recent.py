@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import argparse
 
 # ---------------- CONFIGURATION ---------------- #
 
@@ -87,12 +88,44 @@ def fetch_inat_data():
     all_records = []
     session = get_session()
     
-    # Adaptive Temporal Window: Rolling 180-day window
+    def parse_date(value: str) -> datetime:
+        value = (value or "").strip()
+        if not value:
+            raise ValueError("empty date")
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y", "%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        raise ValueError(f"unsupported date format: {value}")
+
+    args = getattr(fetch_inat_data, "_args", None)
+
     now_utc = datetime.now(timezone.utc)
-    d1 = (now_utc - timedelta(days=180)).strftime('%Y-%m-%d')
-    d2 = now_utc.strftime('%Y-%m-%d')
-    
-    print(f"Fetch Window (180 days): {d1} to {d2}")
+    from_env = os.getenv("INAT_FROM_DATE")
+    to_env = os.getenv("INAT_TO_DATE")
+
+    try:
+        to_dt = parse_date(args.to_date) if args and args.to_date else (parse_date(to_env) if to_env else now_utc)
+    except Exception:
+        to_dt = now_utc
+
+    try:
+        from_dt = parse_date(args.from_date) if args and args.from_date else (parse_date(from_env) if from_env else (to_dt - timedelta(days=180)))
+    except Exception:
+        from_dt = to_dt - timedelta(days=180)
+
+    max_history_days = int(os.getenv("INAT_MAX_HISTORY_DAYS", str(args.max_history_days if args else 730)))
+    step_days = int(os.getenv("INAT_WINDOW_STEP_DAYS", str(args.step_days if args else 90)))
+    lstm_window_size = int(os.getenv("LSTM_WINDOW_SIZE", "5"))
+    lstm_min_samples = int(os.getenv("LSTM_MIN_SAMPLES", "15"))
+
+    if from_dt > to_dt:
+        from_dt, to_dt = to_dt - timedelta(days=180), to_dt
+
+    max_lookback_dt = to_dt - timedelta(days=max_history_days)
+
+    print(f"Fetch Window (initial): {from_dt.strftime('%Y-%m-%d')} to {to_dt.strftime('%Y-%m-%d')}")
 
     for taxon_id_str, info in SPECIES.items():
         common_name = info["name"]
@@ -102,12 +135,12 @@ def fetch_inat_data():
         final_scope = "regional"
         final_grade = "none"
 
-        def try_fetch(scope, grade):
+        def try_fetch(scope, grade, d1_str, d2_str):
             # include_subtaxa=true is required to capture subspecies in species-level queries
             params = {
                 "taxon_id": int(taxon_id_str),
-                "d1": d1,
-                "d2": d2,
+                "d1": d1_str,
+                "d2": d2_str,
                 "per_page": 50, # Reduced to avoid silent throttling
                 "order_by": "observed_on",
                 "order": "desc",
@@ -135,17 +168,47 @@ def fetch_inat_data():
                 print(f"  [Error] Fetch failed ({scope}/{grade}): {e}")
                 return []
 
-        # Two-stage adaptive strategy: Regional -> Global Fallback
-        for current_scope in ["regional", "global"]:
-            for current_grade in ["research", "needs_id", "any"]:
-                results = try_fetch(current_scope, current_grade)
-                if results:
-                    species_results = results
-                    final_scope = current_scope
-                    final_grade = current_grade
+        effective_from = from_dt
+        attempts = 0
+
+        while True:
+            attempts += 1
+            d1_str = effective_from.strftime("%Y-%m-%d")
+            d2_str = to_dt.strftime("%Y-%m-%d")
+
+            species_results = []
+
+            for current_scope in ["regional", "global"]:
+                for current_grade in ["research", "needs_id", "any"]:
+                    results = try_fetch(current_scope, current_grade, d1_str, d2_str)
+                    if results:
+                        species_results = results
+                        final_scope = current_scope
+                        final_grade = current_grade
+                        break
+                if species_results:
                     break
-            if species_results:
+
+            usable_count = sum(1 for obs in species_results if obs.get("location"))
+            min_required = max(lstm_min_samples, lstm_window_size + 1)
+
+            if usable_count >= min_required:
+                if attempts > 1:
+                    print(f"  [OK] Expanded window satisfied LSTM minimum: {usable_count} records (min {min_required}) using d1={d1_str}")
                 break
+
+            if effective_from <= max_lookback_dt:
+                break
+
+            next_from = effective_from - timedelta(days=step_days)
+            if next_from < max_lookback_dt:
+                next_from = max_lookback_dt
+
+            if next_from == effective_from:
+                break
+
+            print(f"  [LSTM-Window] Insufficient records for sequences ({usable_count} < {min_required}). Expanding d1: {d1_str} -> {next_from.strftime('%Y-%m-%d')}")
+            effective_from = next_from
 
         if not species_results:
             print(f"  [Empty] No records found for {common_name} even after fallback.")
@@ -172,6 +235,7 @@ def fetch_inat_data():
                     image_url = photo_url.replace("square", "medium")
             
             all_records.append({
+                "id": obs.get("id"),
                 "animal": common_name,
                 "scientific_name": info["scientific"],
                 "emoji": info["emoji"],
@@ -199,7 +263,17 @@ def fetch_inat_data():
 def main():
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n--- iNaturalist Adaptive Fetch | {now_str} UTC ---")
-    
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--from", dest="from_date", default=None)
+    parser.add_argument("--to", dest="to_date", default=None)
+    parser.add_argument("--max-history-days", dest="max_history_days", type=int, default=730)
+    parser.add_argument("--step-days", dest="step_days", type=int, default=90)
+    try:
+        fetch_inat_data._args = parser.parse_args()
+    except SystemExit:
+        fetch_inat_data._args = None
+
     records = fetch_inat_data()
     
     if records:

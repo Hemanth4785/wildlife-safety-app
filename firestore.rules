@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User profiles: Users can only read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Animal Sightings: Only authenticated users can access
+    match /animal_sightings/{sightingId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Default: Deny everything else
+    match /{document=**} {
+      allow read, write: false;
+    }
+  }
+}

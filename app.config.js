@@ -32,7 +32,7 @@ export default {
     extra: {
       // GEMINI / Google GenAI temporarily disabled — use mock placeholders only.
       // GEMINI_API_KEY: process.env.GEMINI_API_KEY || process.env.EXPO_PUBLIC_GEMINI_API_KEY || "",
-      API_BASE_URL: "http://192.168.0.102:3000"
+      API_BASE_URL: "http://192.168.0.104:3000"
     },
     plugins: [
       [

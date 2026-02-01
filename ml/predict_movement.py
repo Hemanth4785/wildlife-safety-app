@@ -101,9 +101,33 @@ def predict_future_risk(input_data):
         }
 
     if len(recent_path) < WINDOW_SIZE:
+        try:
+            last_lat, last_lon = float(recent_path[-1][0]), float(recent_path[-1][1])
+            dist_km = haversine(user_location['lat'], user_location['lon'], last_lat, last_lon)
+        except Exception:
+            dist_km = 0.0
+
+        rf_record = {
+            "animal": animal,
+            "distance_km": float(dist_km),
+            "eventDate": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "metadata": input_data.get('metadata', {"confidence": "medium", "scope": "regional"})
+        }
+
+        try:
+            rf_result = predict_risk(rf_record)
+            final_risk = rf_result.get('risk', 'Medium')
+        except Exception:
+            final_risk = "Medium"
+
         return {
             "error": f"Insufficient path history. Need at least {WINDOW_SIZE} recent GPS points (received {len(recent_path)})",
-            "status": "failed"
+            "status": "degraded",
+            "animal": animal,
+            "predicted_path": [],
+            "risk_level": final_risk,
+            "distance_to_user_km": round(float(dist_km), 3),
+            "model_used": "skipped"
         }
 
     try:
@@ -116,7 +140,7 @@ def predict_future_risk(input_data):
         if not model:
             if model_used == "tensorflow_missing":
                 return {"error": "TensorFlow not installed in environment", "status": "failed"}
-            return {"error": "No trained LSTM models found (species or generic)", "status": "failed"}
+            return {"error": "No trained LSTM models found (species or generic)", "status": "degraded", "animal": animal, "predicted_path": [], "risk_level": "Medium", "distance_to_user_km": 0, "model_used": "skipped"}
 
         # Recursive multi-step prediction
         predicted_path = []
