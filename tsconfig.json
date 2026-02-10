@@ -10,6 +10,7 @@
     /* Critical fix: override Expo's invalid setting */
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
     "moduleSuffixes": [".native", ".web", ""],
 
     /* Interop */

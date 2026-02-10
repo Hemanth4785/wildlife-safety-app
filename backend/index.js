@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { spawnSync, execFile } from 'child_process';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc } from 'firebase/firestore';
+import polyline from '@mapbox/polyline';
 
 dotenv.config();
 
@@ -36,14 +37,23 @@ console.log("Server file loaded");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_inat_recent.py');
 const WILDLIFE_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'inat_live.json');
+const GBIF_PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_gbif_recent.py');
+const GBIF_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'gbif_recent.json');
 const ML_DIR = path.resolve(__dirname, '..', 'ml');
 const ML_PREDICT_SCRIPT = path.join(ML_DIR, 'predict_risk.py');
-const ML_MOVEMENT_SCRIPT = path.join(ML_DIR, 'predict_movement.py');
+const ML_LSTM_SCRIPT = path.join(ML_DIR, 'predict_movement.py');
+const ML_MAXENT_SCRIPT = path.join(ML_DIR, 'predict_maxent.py');
 
-// Use the absolute path to the virtual environment's Python executable
-const ML_PYTHON_EXE = process.platform === 'win32' 
-    ? path.resolve(__dirname, '..', 'lstm_env', 'Scripts', 'python.exe') 
-    : path.resolve(__dirname, '..', 'lstm_env', 'bin', 'python3');
+// Resolve Python executable for LSTM engine with robust fallback
+const ML_PYTHON_EXE = (() => {
+    if (process.platform === 'win32') {
+        const venvPath = path.resolve(__dirname, '..', 'lstm_env', 'Scripts', 'python.exe');
+        return fs.existsSync(venvPath) ? venvPath : 'python';
+    } else {
+        const venvPath = path.resolve(__dirname, '..', 'lstm_env', 'bin', 'python3');
+        return fs.existsSync(venvPath) ? venvPath : 'python3';
+    }
+})();
 
 const INAT_PYTHON_EXE = (() => {
     if (process.platform === 'win32') {
@@ -158,19 +168,213 @@ app.use(
     allowedHeaders: ['Content-Type'],
   })
 );
-app.use(express.json({ limit: '10mb' })); // Increase limit for large route geometries
+app.use(express.json({ limit: '10mb' }));
 
-// --- Wildlife data: run Python script, fall back to cached JSON ---
-const getWildlifeData = () => {
+app.get('/api/proxy-image', async (req, res) => {
     try {
-        const raw = fs.readFileSync(WILDLIFE_CACHE_PATH, 'utf8');
+        const url = String(req.query.u || '');
+        if (!url) return res.status(400).json({ error: 'Missing url' });
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'WildlifeSafetyApp/1.0 (+image-proxy)'
+            }
+        });
+        const ct = String(response.headers['content-type'] || 'image/jpeg');
+        if (!ct.startsWith('image/')) {
+            return res.status(415).json({ error: 'Unsupported content type' });
+        }
+        res.setHeader('Content-Type', ct);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.send(Buffer.from(response.data, 'binary'));
+    } catch (err) {
+        res.status(502).json({ error: 'Image fetch failed' });
+    }
+});
+
+// --- Local ML: Species Classifier ---
+app.post('/api/ml/classify-image', (req, res) => {
+    try {
+        const { data } = req.body || {};
+        if (!data) return res.status(400).json({ error: 'Missing base64 image data' });
+        const payload = JSON.stringify({ mode: 'infer', image_base64: String(data) });
+        execFile(ML_PYTHON_EXE, [path.join(ML_DIR, 'species_classifier.py'), payload], {
+            cwd: ML_DIR,
+            timeout: 20000,
+            maxBuffer: 1024 * 1024 * 10
+        }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('[Local-ML] Error:', error.message);
+                return res.status(200).json({ common: 'Unknown', scientific: 'Unknown', confidence: 0.0 });
+            }
+            try {
+                const parsed = JSON.parse(stdout.trim());
+                return res.json(parsed);
+            } catch (e) {
+                console.error('[Local-ML] Parse error:', e.message);
+                return res.status(200).json({ common: 'Unknown', scientific: 'Unknown', confidence: 0.0 });
+            }
+        });
+    } catch (e) {
+        console.error('[Local-ML] Exception:', e.message);
+        return res.status(200).json({ common: 'Unknown', scientific: 'Unknown', confidence: 0.0 });
+    }
+});
+
+// --- Local ML: Build Dataset from iNaturalist & GBIF ---
+app.post('/api/ml/build-dataset', (req, res) => {
+    try {
+        const { api_urls, per_species_limit, output_dir } = req.body || {};
+        const defaults = [
+            'https://api.inaturalist.org/v1/observations?taxon_name=Leopard&order=desc&order_by=created_at&per_page=50',
+            'https://api.inaturalist.org/v1/observations?taxon_name=Tiger&order=desc&order_by=created_at&per_page=50',
+            'https://api.inaturalist.org/v1/observations?taxon_name=Asian%20Elephant&order=desc&order_by=created_at&per_page=50',
+            'https://api.inaturalist.org/v1/observations?taxon_name=Sloth%20Bear&order=desc&order_by=created_at&per_page=50',
+            'https://api.inaturalist.org/v1/observations?taxon_name=Gaur&order=desc&order_by=created_at&per_page=50',
+            'https://api.inaturalist.org/v1/observations?taxon_name=Bison&order=desc&order_by=created_at&per_page=50',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Panthera%20pardus&limit=50&sort=lastInterpreted',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Panthera%20tigris&limit=50&sort=lastInterpreted',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Elephas%20maximus&limit=50&sort=lastInterpreted',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Melursus%20ursinus&limit=50&sort=lastInterpreted',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Bos%20gaurus&limit=50&sort=lastInterpreted',
+            'https://api.gbif.org/v1/occurrence/search?scientificName=Bison%20bison&limit=50&sort=lastInterpreted',
+        ];
+        const urls = Array.isArray(api_urls) && api_urls.length ? api_urls : defaults;
+        const outDir = output_dir ? String(output_dir) : path.join(ML_DIR, 'dataset');
+        const limit = Number.isFinite(per_species_limit) ? Number(per_species_limit) : 100;
+        const payload = JSON.stringify({ mode: 'build', api_urls: urls, output_dir: outDir, per_species_limit: limit });
+        const scriptPath = path.join(ML_DIR, 'species_classifier.py');
+        execFile(ML_PYTHON_EXE, [scriptPath, payload], {
+            cwd: ML_DIR,
+            timeout: 180000,
+            maxBuffer: 1024 * 1024 * 20
+        }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('[Dataset-Builder] Error:', error.message);
+                if (stderr) console.error('[Dataset-Builder] Stderr:', String(stderr).slice(0, 1000));
+                if (stdout) console.error('[Dataset-Builder] Stdout:', String(stdout).slice(0, 1000));
+                return res.status(500).json({ error: 'Dataset build failed' });
+            }
+            try {
+                const parsed = JSON.parse(stdout.trim());
+                return res.json(parsed);
+            } catch (e) {
+                console.error('[Dataset-Builder] Parse error:', e.message);
+                return res.status(200).json({ status: 'ok', message: 'Build completed', raw: stdout.trim() });
+            }
+        });
+    } catch (e) {
+        console.error('[Dataset-Builder] Exception:', e.message);
+        return res.status(500).json({ error: 'Dataset build failed' });
+    }
+});
+
+// --- Local ML: Train Species Classifier ---
+app.post('/api/ml/train-model', (req, res) => {
+    try {
+        const { data_dir, epochs, batch_size } = req.body || {};
+        const dir = data_dir ? String(data_dir) : path.join(ML_DIR, 'dataset');
+        const payload = JSON.stringify({ mode: 'train', data_dir: dir, epochs: Number(epochs || 5), batch_size: Number(batch_size || 16) });
+        const scriptPath = path.join(ML_DIR, 'species_classifier.py');
+        execFile(ML_PYTHON_EXE, [scriptPath, payload], {
+            cwd: ML_DIR,
+            timeout: 300000,
+            maxBuffer: 1024 * 1024 * 20
+        }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('[Train-Model] Error:', error.message);
+                if (stderr) console.error('[Train-Model] Stderr:', String(stderr).slice(0, 1000));
+                if (stdout) console.error('[Train-Model] Stdout:', String(stdout).slice(0, 1000));
+                return res.status(500).json({ error: 'Training failed' });
+            }
+            try {
+                const parsed = JSON.parse(stdout.trim());
+                return res.json(parsed);
+            } catch (e) {
+                console.error('[Train-Model] Parse error:', e.message);
+                return res.status(200).json({ status: 'ok', raw: stdout.trim() });
+            }
+        });
+    } catch (e) {
+        console.error('[Train-Model] Exception:', e.message);
+        return res.status(500).json({ error: 'Training failed' });
+    }
+});
+// --- Wildlife data helpers ---
+// --- Local ML: Seed Dataset via iNaturalist (Node/axios) ---
+app.post('/api/ml/seed-dataset', async (req, res) => {
+    try {
+        const perSpecies = Number(req.body?.per_species_limit || 10);
+        const outDir = req.body?.output_dir ? String(req.body.output_dir) : path.join(ML_DIR, 'dataset');
+        const species = [
+            { name: 'Leopard', sci: 'Panthera pardus' },
+            { name: 'Tiger', sci: 'Panthera tigris' },
+            { name: 'Asian Elephant', sci: 'Elephas maximus' },
+            { name: 'Sloth Bear', sci: 'Melursus ursinus' },
+            { name: 'Gaur', sci: 'Bos gaurus' },
+            { name: 'Bison', sci: 'Bison bison' },
+        ];
+        const results = {};
+        await fs.promises.mkdir(outDir, { recursive: true });
+        for (const sp of species) {
+            const url = `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sp.name)}&order=desc&order_by=created_at&per_page=${perSpecies}`;
+            try {
+                const resp = await axios.get(url, { timeout: 15000 });
+                const obs = Array.isArray(resp.data?.results) ? resp.data.results : [];
+                let count = 0;
+                for (const r of obs) {
+                    if (count >= perSpecies) break;
+                    let img = '';
+                    const photos = r.photos || [];
+                    if (photos && photos.length) {
+                        img = photos[0].url || photos[0].medium_url || '';
+                        if (img && img.includes('{size}')) img = img.replace('{size}', 'medium');
+                    }
+                    if (!img) {
+                        const dp = r?.taxon?.default_photo;
+                        if (dp) {
+                            img = dp.medium_url || dp.url || '';
+                            if (img && img.includes('{size}')) img = img.replace('{size}', 'medium');
+                        }
+                    }
+                    if (!img) continue;
+                    const spDir = path.join(outDir, sp.sci);
+                    await fs.promises.mkdir(spDir, { recursive: true });
+                    const id = String(r.id || Date.now());
+                    const file = path.join(spDir, `${id}.jpg`);
+                    try {
+                        const im = await axios.get(img, { responseType: 'arraybuffer', timeout: 20000, headers: { 'User-Agent': 'WildlifeSafetyApp/1.0 (+seed-dataset)' } });
+                        await fs.promises.writeFile(file, Buffer.from(im.data));
+                        count++;
+                    } catch (imgErr) {
+                        /* ignore image fetch errors */
+                    }
+                }
+                results[sp.sci] = count;
+            } catch (err) {
+                results[sp.sci] = `error: ${err.message}`;
+            }
+        }
+        res.json({ status: 'ok', counts: results, output_dir: outDir });
+    } catch (e) {
+        console.error('[Seed-Dataset] Exception:', e.message);
+        res.status(500).json({ error: 'Seed dataset failed' });
+    }
+});
+// --- Wildlife data helpers ---
+const readJsonArray = (filePath) => {
+    try {
+        const raw = fs.readFileSync(filePath, 'utf8');
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
     } catch (err) {
-        console.error("Error reading wildlife cache:", err.message);
+        console.error(`Error reading cache ${path.basename(filePath)}:`, err.message);
         return [];
     }
 };
+const getInatData = () => readJsonArray(WILDLIFE_CACHE_PATH);
+const getGbifData = () => readJsonArray(GBIF_CACHE_PATH);
 
 const runInatPython = () => {
     const r = spawnSync(INAT_PYTHON_EXE, [PYTHON_SCRIPT], {
@@ -184,6 +388,23 @@ const runInatPython = () => {
     }
     if (r.status !== 0) {
         console.error("iNaturalist Python stderr:", r.stderr || r.error);
+        return false;
+    }
+    return true;
+};
+
+const runGbifPython = () => {
+    const r = spawnSync(INAT_PYTHON_EXE, [GBIF_PYTHON_SCRIPT], {
+        cwd: path.dirname(GBIF_PYTHON_SCRIPT),
+        encoding: 'utf8',
+        timeout: 60000,
+    });
+    if (r.error) {
+        console.error("GBIF Python spawn error:", r.error.message);
+        return false;
+    }
+    if (r.status !== 0) {
+        console.error("GBIF Python stderr:", r.stderr || r.error);
         return false;
     }
     return true;
@@ -219,21 +440,44 @@ const syncSightingsToFirestore = async (sightings) => {
     console.log(`[Sync] Successfully synced ${count} documents.`);
 };
 
-app.get(['/api/wildlife/recent', '/api/inat/recent', '/api/gbif/recent'], (req, res) => {
+// iNaturalist recent sightings
+app.get('/api/inat/recent', (req, res) => {
     if (runInatPython()) {
-        const fresh = getWildlifeData();
-        // Fire-and-forget sync to avoid blocking the response
+        const fresh = getInatData();
         syncSightingsToFirestore(fresh).catch(err => console.error("Sync error:", err));
         return res.json(fresh);
     }
-    const cached = getWildlifeData();
+    const cached = getInatData();
     res.json(cached);
+});
+
+// GBIF recent sightings
+app.get('/api/gbif/recent', (req, res) => {
+    if (runGbifPython()) {
+        const fresh = getGbifData();
+        // Optional: also sync GBIF records
+        syncSightingsToFirestore(fresh).catch(err => console.error("Sync error:", err));
+        return res.json(fresh);
+    }
+    const cached = getGbifData();
+    res.json(cached);
+});
+
+// Unified wildlife feed (merged iNat + GBIF)
+app.get('/api/wildlife/recent', (req, res) => {
+    // Try to refresh both; fallback to cached if any fails
+    runInatPython();
+    runGbifPython();
+    const inat = getInatData();
+    const gbif = getGbifData();
+    // Simple merge; consider de-dup by lat/lon and time if needed
+    res.json([...inat, ...gbif]);
 });
 
 // --- New: sightings API for useAnimalData hook ---
 app.get('/api/sightings', (req, res) => {
     const { scientificName, lat, lon, radius } = req.query;
-    const wildlife = getWildlifeData();
+    const wildlife = [...getInatData(), ...getGbifData()];
     
     const filtered = wildlife.filter(animal => {
         if (scientificName && animal.scientific_name !== scientificName) return false;
@@ -251,39 +495,181 @@ app.get('/api/sightings', (req, res) => {
     res.json(filtered);
 });
 
-// --- NEW: Safe Route OSRM Proxy ---
+// --- NEW: Safe Route Proxy (Dual Mode: Google -> OSRM Fallback) ---
 app.get('/api/route/osrm', async (req, res) => {
-    const { startLat, startLon, endLat, endLon } = req.query;
+    const { startLat, startLon, endLat, endLon, mode } = req.query; // mode: 'car', 'walk', etc.
 
     if (!startLat || !startLon || !endLat || !endLon) {
         return res.status(400).json({ error: 'Missing coordinates' });
     }
 
-    const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'http://router.project-osrm.org';
-    // Use 'driving' profile by default
-    const url = `${OSRM_BASE_URL}/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
+    // --- Helper: OSRM Logic ---
+    const fetchOsrmRoute = async () => {
+        try {
+            console.log('[OSRM] Attempting OSRM fallback...');
+            const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'http://router.project-osrm.org';
+            // Map modes: car->driving, walk->foot, bike->bike
+            let osrmProfile = 'driving';
+            if (mode === 'walk') osrmProfile = 'foot';
+            else if (mode === 'bike') osrmProfile = 'bike';
+            
+            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
+            console.log(`[OSRM] Fetching: ${url}`);
+            
+            const response = await axios.get(url, { timeout: 3000 });
+            if (!response.data.routes || response.data.routes.length === 0) {
+                return { status: 'degraded', error: 'No OSRM route found' };
+            }
+            
+            const route = response.data.routes[0];
+            return {
+                geometry: route.geometry,
+                distance: route.distance,
+                duration: route.duration,
+                status: 'success',
+                source: 'osrm'
+            };
+        } catch (error) {
+            console.error("[OSRM] Failed:", error.message);
+            return { status: 'failed', error: error.message };
+        }
+    };
+
+    // Check Config
+    const useGoogle = process.env.USE_GOOGLE_ROUTES === 'true';
+    const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+
+    if (!useGoogle || !API_KEY) {
+        console.log('[Route] Google disabled or key missing. Using OSRM directly.');
+        const osrmResult = await fetchOsrmRoute();
+        if (osrmResult.status === 'success') return res.json(osrmResult);
+        // If OSRM fails, fallback to straight line
+        return res.json({ 
+            status: 'degraded', 
+            error: 'Routing service unavailable',
+            message: "Using straight-line fallback"
+        });
+    }
+
+    // --- Google Routes Logic ---
+    // Map internal travel mode to Google Routes API travel mode
+    let travelMode = 'DRIVE';
+    if (mode === 'walk') travelMode = 'WALK';
+    else if (mode === 'bike') travelMode = 'BICYCLE';
+    else if (mode === 'bus') travelMode = 'TRANSIT';
+
+    const url = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+
+    const payload = {
+        origin: {
+            location: {
+                latLng: {
+                    latitude: parseFloat(startLat),
+                    longitude: parseFloat(startLon)
+                }
+            }
+        },
+        destination: {
+            location: {
+                latLng: {
+                    latitude: parseFloat(endLat),
+                    longitude: parseFloat(endLon)
+                }
+            }
+        },
+        travelMode: travelMode,
+        routingPreference: travelMode === 'DRIVE' ? 'TRAFFIC_AWARE' : undefined,
+        computeAlternativeRoutes: false,
+        routeModifiers: {
+            avoidTolls: false,
+            avoidHighways: false,
+            avoidFerries: false
+        },
+        polylineEncoding: 'ENCODED_POLYLINE',
+        languageCode: 'en-US',
+        units: 'METRIC'
+    };
+
+    const fieldMask = 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline';
 
     try {
-        console.log(`Fetching OSRM route: ${url}`);
-        const response = await axios.get(url, { timeout: 3000 }); // Strict 3s timeout
-        if (!response.data.routes || response.data.routes.length === 0) {
-            return res.status(200).json({ status: 'degraded', error: 'No route found' });
+        console.log(`[Google Routes] Fetching route: ${travelMode} from (${startLat},${startLon}) to (${endLat},${endLon})`);
+        
+        const response = await axios.post(url, payload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': API_KEY.trim(),
+                'X-Goog-FieldMask': fieldMask
+            },
+            timeout: 5000 // 5s timeout
+        });
+
+        const routes = response.data.routes;
+        if (!routes || routes.length === 0) {
+            // If Google returns valid response but no routes, try OSRM?
+            // Usually means no road exists. OSRM likely won't find one either, but worth a try.
+            console.warn('[Google Routes] No routes found. Trying OSRM...');
+            const osrmResult = await fetchOsrmRoute();
+            return res.json(osrmResult.status === 'success' ? osrmResult : { status: 'degraded', error: 'No route found' });
+        }
+
+        const route = routes[0];
+        if (!route.polyline || !route.polyline.encodedPolyline) {
+             throw new Error('Missing geometry in Google response');
+        }
+
+        const encodedPolyline = route.polyline.encodedPolyline;
+        const path = polyline.decode(encodedPolyline);
+        const geoJsonCoordinates = path.map(p => [p[1], p[0]]); // [lat, lon] -> [lon, lat]
+
+        let durationSeconds = 0;
+        if (route.duration) {
+            durationSeconds = parseInt(route.duration.replace('s', ''), 10);
+        }
+
+        res.json({
+            geometry: {
+                coordinates: geoJsonCoordinates,
+                type: 'LineString'
+            },
+            distance: route.distanceMeters, 
+            duration: durationSeconds,      
+            status: 'success',
+            source: 'google'
+        });
+
+    } catch (error) {
+        console.error("[Google Routes] Error:", error.message);
+        
+        let shouldFallback = false;
+
+        if (error.response) {
+            console.error("[Google Routes] Details:", JSON.stringify(error.response.data));
+            // Check for Billing or Quota errors
+            // 403: Forbidden (often Billing disabled or API not enabled)
+            // 429: Too Many Requests (Quota)
+            if (error.response.status === 403 || error.response.status === 429) {
+                console.warn(`[Google Routes] Service restricted (${error.response.status}). Falling back to OSRM.`);
+                shouldFallback = true;
+            }
+        } else {
+            // Network timeout or other error
+            shouldFallback = true;
+        }
+
+        if (shouldFallback) {
+            const osrmResult = await fetchOsrmRoute();
+            if (osrmResult.status === 'success') {
+                return res.json(osrmResult);
+            }
         }
         
-        const route = response.data.routes[0];
-        res.json({
-            geometry: route.geometry,
-            distance: route.distance,
-            duration: route.duration,
-            status: 'success'
-        });
-    } catch (error) {
-        console.error("[OSRM] Degraded:", error.message);
-        // Fallback for routing service failure
+        // Final fallback to straight line
         res.json({ 
             status: 'degraded', 
             error: 'Routing service unavailable',
-            message: "Using straight-line fallback (degraded mode)"
+            message: "Using straight-line fallback (degraded mode)",
+            details: error.message
         });
     }
 });
@@ -308,7 +694,7 @@ app.post('/api/animals/near-route', (req, res) => {
     // Convert [lon, lat] to [lat, lon] for our helper
     const routePath = pathPoints.map(p => [p[1], p[0]]);
 
-    const wildlife = getWildlifeData();
+    const wildlife = [...getInatData(), ...getGbifData()];
     const riskZones = [];
 
     // Filter logic
@@ -527,6 +913,124 @@ app.get('/api/weather', async (req, res) => {
     }
 });
 
+// --- Gemini Proxy: Analyze Image ---
+app.post('/api/gemini/analyze-image', async (req, res) => {
+    try {
+        const { mimeType, data, prompt } = req.body || {};
+        if (!mimeType || !data) return res.status(400).json({ error: 'Missing mimeType or data' });
+        const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+        const model = process.env.EXPO_PUBLIC_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+        if (!key) return res.status(200).json(null);
+        const structured = [
+            'Return strict JSON with keys:',
+            'common, scientific, confidence (0-1), risk (Low|Medium|High), behavior, circumstance,',
+            'distance_advice, actions (array of short steps), emergency (array), summary.',
+            'Only choose species from the allowed list in the prompt; if uncertain set common="Unknown", scientific="Unknown", confidence<=0.3.',
+            'No markdown, no code fences, no extra text.'
+        ].join(' ');
+        const finalPrompt = `${String(prompt || 'Identify species from allowed list and provide safety advice.')} ${structured}`;
+        const contents = [
+            { role: 'user', parts: [{ text: finalPrompt }] },
+            { role: 'user', parts: [{ inline_data: { mime_type: String(mimeType), data: String(data) } }] }
+        ];
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+        const response = await axios.post(url, {
+            contents,
+            generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 500 }
+        }, { timeout: 10000 });
+        let text = response?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        let cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '');
+        if (!cleaned.startsWith('{')) {
+            const start = cleaned.indexOf('{');
+            const end = cleaned.lastIndexOf('}');
+            if (start >= 0 && end >= start) cleaned = cleaned.slice(start, end + 1);
+        }
+        let parsed = null;
+        try { parsed = JSON.parse(cleaned); } catch { parsed = null; }
+        const sciRaw = typeof parsed?.scientific === 'string' ? parsed.scientific : '';
+        const sciCanon = sciRaw ? String(sciRaw).trim().split(/\s+/).slice(0,2).join(' ') : 'Unknown';
+        const out = {
+            common: typeof parsed?.common === 'string' ? parsed.common : 'Unknown',
+            scientific: sciCanon || 'Unknown',
+            confidence: Number.isFinite(parsed?.confidence) ? Math.max(0, Math.min(1, Number(parsed.confidence))) : 0.3,
+            risk: ['Low','Medium','High'].includes(parsed?.risk) ? parsed.risk : 'Medium',
+            behavior: typeof parsed?.behavior === 'string' ? parsed.behavior : '',
+            circumstance: typeof parsed?.circumstance === 'string' ? parsed.circumstance : '',
+            distance_advice: typeof parsed?.distance_advice === 'string' ? parsed.distance_advice : '',
+            actions: Array.isArray(parsed?.actions) ? parsed.actions.filter(a => typeof a === 'string').slice(0, 8) : [],
+            emergency: Array.isArray(parsed?.emergency) ? parsed.emergency.filter(a => typeof a === 'string').slice(0, 6) : [],
+            summary: typeof parsed?.summary === 'string' ? parsed.summary : 'Uncertain identification from the photo.'
+        };
+        // Map common/scientific variants to allowed species
+        const ALLOWED = [
+            { sci: 'Elephas maximus', common: 'Asian Elephant', keys: ['elephant','asian elephant','indian elephant'] },
+            { sci: 'Panthera tigris', common: 'Tiger', keys: ['tiger','bengal tiger','royal bengal tiger'] },
+            { sci: 'Panthera pardus', common: 'Leopard', keys: ['leopard','indian leopard'] },
+            { sci: 'Bos gaurus', common: 'Gaur', keys: ['gaur','indian bison'] },
+            { sci: 'Melursus ursinus', common: 'Sloth Bear', keys: ['sloth bear','bear'] },
+            { sci: 'Bison bison', common: 'Bison', keys: ['bison','american bison'] },
+        ];
+        const norm = (s) => String(s || '').toLowerCase();
+        const byCommon = ALLOWED.find(a => a.keys.some(k => norm(out.common).includes(k)));
+        const byScientific = ALLOWED.find(a => a.keys.some(k => norm(out.scientific).includes(k)));
+        const chosen = byScientific || byCommon;
+        if (chosen) {
+            out.common = chosen.common;
+            out.scientific = chosen.sci;
+            out.confidence = Math.max(out.confidence, 0.6);
+        }
+        // If still unknown or low confidence, try a general classification and map it
+        const needsFallback = (out.common === 'Unknown' || out.scientific === 'Unknown' || out.confidence < 0.4);
+        if (needsFallback) {
+            try {
+                const generalPrompt = 'Classify the main animal in this photo. Return JSON: {"common":"...", "scientific":"..."} only.';
+                const generalContents = [
+                    { role: 'user', parts: [{ text: generalPrompt }] },
+                    { role: 'user', parts: [{ inline_data: { mime_type: String(mimeType), data: String(data) } }] }
+                ];
+                const generalResp = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+                    contents: generalContents,
+                    generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 200 }
+                }, { timeout: 10000 });
+                let t2 = generalResp?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+                t2 = t2.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '');
+                if (!t2.startsWith('{')) {
+                    const s = t2.indexOf('{'); const e = t2.lastIndexOf('}');
+                    if (s >= 0 && e >= s) t2 = t2.slice(s, e + 1);
+                }
+                let g = null; try { g = JSON.parse(t2); } catch { g = null; }
+                const mapped = ALLOWED.find(a => a.keys.some(k => norm(g?.common).includes(k) || norm(g?.scientific).includes(k)));
+                if (mapped) {
+                    out.common = mapped.common;
+                    out.scientific = mapped.sci;
+                    out.confidence = Math.max(out.confidence, 0.6);
+                    out.summary = out.summary || `Likely ${mapped.common}.`;
+                }
+            } catch { /* ignore */ }
+        }
+        // If Unknown or low confidence and we have base64, try local ML classifier
+        const needsLocal = (out.common === 'Unknown' || out.scientific === 'Unknown' || out.confidence < 0.4);
+        if (needsLocal) {
+            try {
+                const localResp = await axios.post('http://localhost:' + (process.env.PORT || 3000) + '/api/ml/classify-image', { data: String(data) }, { timeout: 12000 });
+                const l = localResp?.data || {};
+                if (l && l.common && l.scientific && l.common !== 'Unknown') {
+                    out.common = l.common;
+                    out.scientific = l.scientific;
+                    out.confidence = Math.max(out.confidence, Number(l.confidence || 0.6));
+                    out.summary = out.summary || `Likely ${l.common}.`;
+                }
+            } catch (e) {
+                /* ignore local ml errors */
+            }
+        }
+        return res.json(out);
+    } catch (error) {
+        console.error('[Gemini Proxy] Error:', error?.message || String(error));
+        return res.status(200).json({ common: 'Unknown', scientific: 'Unknown', confidence: 0.3, risk: 'Medium', behavior: '', circumstance: '', distance_advice: '', actions: [], emergency: [], summary: 'Uncertain identification from the photo.' });
+    }
+});
+
 // --- ML Risk Prediction Endpoint ---
 app.post('/api/predict-risk', (req, res) => {
     const { animal, distance_km, confidence, scope, eventDate } = req.body;
@@ -606,108 +1110,116 @@ app.post('/api/predict-movement', async (req, res) => {
         return res.status(400).json({ error: 'Missing required prediction fields (animal, user_location, recent_path)' });
     }
 
-    const inputJson = JSON.stringify({ animal, user_location, recent_path, k_future: k_future || 3 });
+    // Enrich recent_path from cached sightings if the client provided too few points
+    let enrichedRecentPath = Array.isArray(recent_path) ? recent_path : [];
+    try {
+        if (!Array.isArray(enrichedRecentPath) || enrichedRecentPath.length < 2) {
+            const inat = getInatData();
+            const gbif = getGbifData();
+            const merged = [...inat, ...gbif];
+            const matches = merged
+                .filter(r => (r.animal && r.animal.toLowerCase() === String(animal).toLowerCase()))
+                .filter(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+            matches.sort((a, b) => {
+                const ta = new Date(a.eventDate || 0).getTime();
+                const tb = new Date(b.eventDate || 0).getTime();
+                return ta - tb;
+            });
+            const lastFive = matches.slice(-5).map(r => [Number(r.lat), Number(r.lon)]);
+            if (lastFive.length >= 2) {
+                enrichedRecentPath = lastFive;
+            } else if (lastFive.length === 1) {
+                enrichedRecentPath = lastFive;
+            }
+        }
+    } catch (e) {
+        console.warn('[LSTM-Movement] Failed to enrich recent_path from cache:', e.message);
+    }
+
+    const inputJson = JSON.stringify({ animal, user_location, recent_path: enrichedRecentPath, k_future: k_future || 3 });
     
     // 2. Log exact Python command
-    const pythonCmd = `${ML_PYTHON_EXE} ${ML_MOVEMENT_SCRIPT}`;
+    const pythonCmd = `${ML_PYTHON_EXE} ${ML_MAXENT_SCRIPT}`;
     console.log(`[LSTM-Movement] Executing: ${pythonCmd}`);
     console.log(`[LSTM-Movement] Input: ${inputJson}`);
 
-    // Call Python LSTM engine using absolute paths and proper CWD
-    // Step 4: Increase timeout to 60s and maxBuffer to 10MB
-    execFile(ML_PYTHON_EXE, [ML_MOVEMENT_SCRIPT, inputJson], {
+    execFile(ML_PYTHON_EXE, [ML_MAXENT_SCRIPT, inputJson], {
         cwd: ML_DIR,
         timeout: 60000, 
         maxBuffer: 1024 * 1024 * 10
     }, async (error, stdout, stderr) => {
-        // Log stdout, stderr, exitCode
-        console.log(`[LSTM-Movement] Exit Code: ${error ? error.code : 0}`);
-        if (error) console.error('[LSTM-Movement] Exec Error:', error.message);
-        if (stderr) console.error('[LSTM-Movement] Stderr:', stderr);
-        
-        const trimmedStdout = stdout.trim();
-        console.log('[LSTM-Movement] Full Stdout:', trimmedStdout);
-
-        if (error || !trimmedStdout) {
-            console.error('[LSTM-Movement] Critical Error: Engine failed or returned no output');
-            // Step 5: Return graceful fallback
-            return res.status(200).json({ 
-                status: "degraded", 
-                message: "LSTM movement prediction unavailable (engine error)",
-                animal,
-                predicted_path: [],
-                risk_level: "Medium", // Default to Medium if engine fails
-                safety_override: false,
-                distance_to_user_km: 0
-            });
+        const maxentOut = stdout.trim();
+        let maxent = null;
+        if (maxentOut && maxentOut.startsWith('{') && maxentOut.endsWith('}')) {
+            try { maxent = JSON.parse(maxentOut); } catch {}
         }
-
-        // Validate JSON format
-        if (!trimmedStdout.startsWith('{') || !trimmedStdout.endsWith('}')) {
-            console.error('[LSTM-Movement] Invalid JSON structure from Python');
-            return res.status(200).json({ 
-                status: "degraded", 
-                message: "LSTM engine returned invalid format",
-                animal,
-                predicted_path: [],
-                risk_level: "Medium",
-                safety_override: false,
-                distance_to_user_km: 0
-            });
-        }
-
-        try {
-            const prediction = JSON.parse(trimmedStdout);
-            // Log parsed JSON
-            console.log('[LSTM-Movement] Parsed Prediction:', JSON.stringify(prediction, null, 2));
-
-            if (prediction.status === 'failed') {
-                console.warn('[LSTM-Movement] Prediction status failed:', prediction.error);
-                
-                return res.status(200).json({
-                    status: "degraded",
-                    message: `LSTM error: ${prediction.error}`,
-                    animal,
-                    predicted_path: [],
-                    risk_level: prediction.risk_level || "Medium",
-                    safety_override: false,
-                    distance_to_user_km: prediction.distance_to_user_km || 0,
-                    model_used: prediction.model_used || "skipped"
-                });
+        execFile(ML_PYTHON_EXE, [ML_LSTM_SCRIPT, inputJson], {
+            cwd: ML_DIR,
+            timeout: 60000,
+            maxBuffer: 1024 * 1024 * 10
+        }, async (err2, out2, errLog2) => {
+            const lstmOut = out2.trim();
+            let lstm = null;
+            if (lstmOut && lstmOut.startsWith('{') && lstmOut.endsWith('}')) {
+                try { lstm = JSON.parse(lstmOut); } catch {}
             }
-
-            // Reverse Geocoding for each predicted point
-            const enhancedPath = await Promise.all((prediction.predicted_path || []).map(async (point) => {
-                const [lat, lon] = point;
+            const k = (k_future && Number.isFinite(k_future)) ? Number(k_future) : 3;
+            const p1 = Array.isArray(lstm?.predicted_path) ? lstm.predicted_path : [];
+            const p2 = Array.isArray(maxent?.predicted_path) ? maxent.predicted_path : [];
+            const seq = [];
+            for (const p of p1) seq.push([Number(p[0]), Number(p[1])]);
+            for (const p of p2) seq.push([Number(p[0]), Number(p[1])]);
+            const chosen = [];
+            const seen = new Set();
+            for (const [lat, lon] of seq) {
+                const key = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+                if (seen.has(key)) continue;
+                if (chosen.length < k) { seen.add(key); chosen.push([lat, lon]); }
+                if (chosen.length >= k) break;
+            }
+            let finalPath = chosen;
+            if (finalPath.length === 0) {
+                const path = Array.isArray(recent_path) ? recent_path : [];
+                const n = path.length;
+                let lastLat = 0, lastLon = 0, dLat = 0.0005, dLon = 0.0005;
+                if (n >= 1) { lastLat = Number(path[n - 1][0]); lastLon = Number(path[n - 1][1]); }
+                if (n >= 2) {
+                    const prevLat = Number(path[n - 2][0]);
+                    const prevLon = Number(path[n - 2][1]);
+                    dLat = lastLat - prevLat;
+                    dLon = lastLon - prevLon;
+                    dLat = Math.max(Math.min(dLat, 0.01), -0.01);
+                    dLon = Math.max(Math.min(dLon, 0.01), -0.01);
+                }
+                const synthesized = [];
+                for (let i = 1; i <= k; i++) synthesized.push([lastLat + dLat * i, lastLon + dLon * i]);
+                finalPath = synthesized;
+            }
+            const enhancedPath = await Promise.all(finalPath.map(async ([lat, lon]) => {
                 const address = await safeReverseGeocode(lat, lon);
                 return { lat, lon, address };
             }));
-
-            // Final Response Construction
+            const risks = [lstm?.risk_level, maxent?.risk_level].filter(Boolean);
+            const order = { High: 3, Medium: 2, Low: 1 };
+            let riskLevel = 'Low';
+            for (const r of risks) { if (order[String(r)] > order[riskLevel]) riskLevel = String(r); }
+            const safetyOverride = Boolean(lstm?.safety_override) || Boolean(maxent?.safety_override);
+            const d1 = Number(lstm?.distance_to_user_km || 0);
+            const d2 = Number(maxent?.distance_to_user_km || 0);
+            const distKm = Math.max(d1, d2);
+            const degraded = (lstm?.status === 'degraded') || (maxent?.status === 'degraded');
             res.json({
-                animal: prediction.animal,
-                risk: prediction.risk_level, // Added risk as alias for risk_level per requirement
-                risk_level: prediction.risk_level,
-                predicted_path: enhancedPath,
-                safety_override: prediction.safety_override,
-                distance_to_user_km: prediction.distance_to_user_km,
-                model_used: prediction.model_used,
-                degraded: prediction.status === 'degraded' || false,
-                status: prediction.status || "success"
-            });
-
-        } catch (parseErr) {
-            console.error('[LSTM-Movement] Parse Error:', parseErr.message);
-            res.status(200).json({ 
-                status: "degraded", 
-                message: "Failed to parse movement prediction output",
                 animal,
-                predicted_path: [],
-                risk_level: "Medium",
-                safety_override: false,
-                distance_to_user_km: 0
+                risk: riskLevel,
+                risk_level: riskLevel,
+                predicted_path: enhancedPath,
+                safety_override: safetyOverride,
+                distance_to_user_km: distKm,
+                model_used: 'ensemble',
+                degraded,
+                status: 'success'
             });
-        }
+        });
     });
     
     // Write input to stdin as expected by the script

@@ -145,22 +145,51 @@ def predict_future_risk(input_data):
         # Recursive multi-step prediction
         predicted_path = []
         # Ensure points are floats and handled correctly
-        path_array = np.array([[float(p[0]), float(p[1])] for p in recent_path[-WINDOW_SIZE:]])
-        current_sequence = path_array
+        path_array = np.array([[float(p[0]), float(p[1])] for p in recent_path])
+        
+        # Calculate Deltas from recent path
+        # delta[i] = path[i+1] - path[i]
+        # We need at least WINDOW_SIZE deltas, so WINDOW_SIZE + 1 points
+        if len(path_array) < WINDOW_SIZE + 1:
+             # Fallback if we have enough points for WINDOW_SIZE but not enough for deltas?
+             # Actually, if we have 5 points, we have 4 deltas. We need 5 deltas.
+             # So we need 6 points to make 5 deltas.
+             # If we have fewer, we can't run the model properly.
+             # We will zero-pad the beginning if needed, or just return degraded.
+             pass 
+
+        # Calculate deltas
+        deltas = np.diff(path_array, axis=0)
+        
+        # If not enough deltas, pad with mean delta or zeros
+        if len(deltas) < WINDOW_SIZE:
+            # Simple padding: repeat the last delta
+            missing = WINDOW_SIZE - len(deltas)
+            if len(deltas) > 0:
+                padding = np.tile(deltas[-1], (missing, 1))
+                deltas = np.vstack([padding, deltas])
+            else:
+                deltas = np.zeros((WINDOW_SIZE, 2))
+
+        current_sequence = deltas[-WINDOW_SIZE:]
+        last_gps = path_array[-1] # Start prediction from the last known point
         
         for _ in range(k_future):
             # Scale input
-            scaled_input = scaler.transform(current_sequence)
-            lstm_input = scaled_input.reshape(1, WINDOW_SIZE, 2)
+            lstm_input = scaler.transform(current_sequence.reshape(-1, 2)).reshape(1, WINDOW_SIZE, 2)
             
-            # Predict next point
-            pred_scaled = model.predict(lstm_input, verbose=0)
-            pred_gps = scaler.inverse_transform(pred_scaled)[0]
+            # Predict next delta
+            pred_scaled_delta = model.predict(lstm_input, verbose=0)
+            pred_delta = scaler.inverse_transform(pred_scaled_delta)[0]
             
-            predicted_path.append([float(pred_gps[0]), float(pred_gps[1])])
+            # Calculate next absolute point
+            next_gps = last_gps + pred_delta
             
-            # Update sequence for next step (recursive)
-            current_sequence = np.vstack([current_sequence[1:], pred_gps])
+            predicted_path.append([float(next_gps[0]), float(next_gps[1])])
+            
+            # Update state
+            last_gps = next_gps
+            current_sequence = np.vstack([current_sequence[1:], pred_delta])
 
         # Evaluate risk for the immediate next predicted point
         next_lat, next_lon = predicted_path[0]

@@ -46,6 +46,7 @@ SPECIES = {
     "42057": {"name": "Leopard", "scientific": "Panthera pardus", "emoji": "🐆"},
     "74111": {"name": "Gaur", "scientific": "Bos gaurus", "emoji": "🦬"},
     "41651": {"name": "Sloth Bear", "scientific": "Melursus ursinus", "emoji": "🐻"},
+    "42169": {"name": "Bison", "scientific": "Bison bison", "emoji": "🦬"},
 }
 
 # Geographic Center (Western Ghats, South India)
@@ -111,9 +112,14 @@ def fetch_inat_data():
         to_dt = now_utc
 
     try:
-        from_dt = parse_date(args.from_date) if args and args.from_date else (parse_date(from_env) if from_env else (to_dt - timedelta(days=180)))
+        if args and args.from_date:
+            from_dt = parse_date(args.from_date)
+        elif from_env:
+            from_dt = parse_date(from_env)
+        else:
+            from_dt = datetime(2022, 1, 1, tzinfo=timezone.utc)
     except Exception:
-        from_dt = to_dt - timedelta(days=180)
+        from_dt = datetime(2022, 1, 1, tzinfo=timezone.utc)
 
     max_history_days = int(os.getenv("INAT_MAX_HISTORY_DAYS", str(args.max_history_days if args else 730)))
     step_days = int(os.getenv("INAT_WINDOW_STEP_DAYS", str(args.step_days if args else 90)))
@@ -136,26 +142,19 @@ def fetch_inat_data():
         final_grade = "none"
 
         def try_fetch(scope, grade, d1_str, d2_str):
-            # include_subtaxa=true is required to capture subspecies in species-level queries
+            # Use iNaturalist 'taxon_name' as requested, with sorting by created_at
             params = {
-                "taxon_id": int(taxon_id_str),
-                "d1": d1_str,
-                "d2": d2_str,
-                "per_page": 50, # Reduced to avoid silent throttling
-                "order_by": "observed_on",
+                "taxon_name": common_name,
+                "per_page": 50,
+                "order_by": "created_at",
                 "order": "desc",
                 "include_subtaxa": "true"
             }
-            
-            # Geographic filters and has[]=geo applied ONLY in regional stage
-            if scope == "regional":
-                params.update({
-                    "has[]": "geo",
-                    "lat": CENTER["lat"],
-                    "lng": CENTER["lng"],
-                    "radius": CENTER["radius"]
-                })
-            
+            if d1_str:
+                params["d1"] = d1_str
+            if d2_str:
+                params["d2"] = d2_str
+            # Do not apply geographic filters; follow provided API usage pattern
             if grade != "any":
                 params["quality_grade"] = grade
 
@@ -164,7 +163,6 @@ def fetch_inat_data():
                 response.raise_for_status()
                 return response.json().get("results", [])
             except Exception as e:
-                # Log error but continue to allow fallback logic to proceed
                 print(f"  [Error] Fetch failed ({scope}/{grade}): {e}")
                 return []
 

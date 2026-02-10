@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
     "lint": "eslint ."
@@ -20,8 +20,11 @@
     "axios": "^1.13.2",
     "expo": "^54.0.32",
     "expo-constants": "~18.0.13",
+    "expo-image-picker": "~17.0.10",
+    "expo-localization": "~15.0.1",
     "expo-location": "~19.0.8",
     "expo-secure-store": "~15.0.8",
+    "expo-speech-recognition": "^0.2.25",
     "firebase": "^12.8.0",
     "leaflet": "^1.9.4",
     "react": "19.1.0",

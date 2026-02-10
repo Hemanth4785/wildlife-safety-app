@@ -3,7 +3,7 @@ import type { Location, AnimalPrediction, Sighting, Route, NavigationStats, Navi
 import { AppState } from '../types';
 import * as api from '../services/apiService';
 import * as geo from '../services/geoService';
-import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS } from '../constants';
+import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS, MAP_CENTER } from '../constants';
 import { storage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import * as ExpoLocation from 'expo-location';
@@ -328,23 +328,22 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 } else {
                     setBackendReady(true);
                     setBackendError(null);
-                    
-                    // Fetch wildlife sightings only after backend is confirmed ready
-                    // and only load once on app start.
-                    try {
-                        setIsWildlifeLoading(true);
-                        const data = await api.fetchRecentWildlife();
-                        setRecentSightings(data);
-                    } catch (err) {
-                        logger.error('Failed to fetch initial wildlife sightings', err);
-                    } finally {
-                        setIsWildlifeLoading(false);
-                    }
                 }
             } catch (error) {
                 logger.error('Backend health check failed', error);
                 setBackendReady(false);
                 setBackendError('Backend API is not reachable. Some features may be limited.');
+            }
+
+            // Always try to fetch wildlife, as api.fetchRecentWildlife has a static fallback
+            try {
+                setIsWildlifeLoading(true);
+                const data = await api.fetchRecentWildlife();
+                setRecentSightings(data);
+            } catch (err) {
+                logger.error('Failed to fetch initial wildlife sightings', err);
+            } finally {
+                setIsWildlifeLoading(false);
             }
         };
         checkBackend();
@@ -365,8 +364,17 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 setMessage("Displaying local weather. Search an area to see wildlife risks.");
             } catch (error: any) {
                 logger.error("Failed to fetch initial location/weather", error);
-                setStatus(AppState.ERROR);
-                setMessage(error.message || "Could not fetch your location for weather data.");
+                const fallbackLocation = { lat: MAP_CENTER[0], lon: MAP_CENTER[1], name: 'Default Center' };
+                try {
+                    setUserLocation(fallbackLocation);
+                    const weatherData = await api.getWeatherData(fallbackLocation.lat, fallbackLocation.lon);
+                    setWeather(weatherData);
+                    setStatus(AppState.SUCCESS);
+                    setMessage("Using default center. Enable location permissions for precise data.");
+                } catch {
+                    setStatus(AppState.ERROR);
+                    setMessage(error.message || "Could not fetch your location for weather data.");
+                }
             }
         };
 

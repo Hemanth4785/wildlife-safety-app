@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, Image } from 'react-native';
 import type { AnimalPrediction, User, WeatherData, Route } from '../types';
 import { AppState, View as ViewType } from '../types';
 import {
@@ -17,6 +17,7 @@ import {
   SnowIcon
 } from './icons';
 import { NEARBY_KM } from '../constants';
+import AnimalDetailModal from './AnimalDetailModal';
 
 // --- Helper Functions ---
 const getGreeting = () => {
@@ -105,15 +106,38 @@ const RiskLevelCard: React.FC<{ riskScore: number; riskLevel: string; speciesTra
     );
 };
 
-const AlertItem: React.FC<{ alert: AnimalPrediction }> = ({ alert }: { alert: AnimalPrediction }) => (
-    <View style={styles.alertItem}>
-        <Text style={styles.alertEmoji}>{alert.emoji}</Text>
-        <View style={styles.alertContent}>
-            <Text style={styles.alertName}>{alert.common}</Text>
-            <Text style={styles.alertDistance}>{alert.current.dist_km} km away near {alert.current.addr?.split(',').slice(0, 2).join(',') || 'Unknown location'}</Text>
+const toKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+    const R = 6371;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+    return 2 * R * Math.asin(Math.sqrt(x));
+};
+
+const AlertItem: React.FC<{ alert: AnimalPrediction; recentSightings?: Array<{ id: string; name: string; scientificName: string; emoji?: string; lat: number; lon: number; date: string; address?: string; image_url?: string }> }> = ({ alert, recentSightings = [] }: { alert: AnimalPrediction; recentSightings?: Array<{ id: string; name: string; scientificName: string; emoji?: string; lat: number; lon: number; date: string; address?: string; image_url?: string }> }) => {
+    const sameSpecies = recentSightings.filter(s => s.name.toLowerCase() === alert.common.toLowerCase() || s.scientificName.toLowerCase() === alert.scientific.toLowerCase());
+    let thumb: string | undefined = undefined;
+    if (sameSpecies.length > 0) {
+        let nearest = sameSpecies[0];
+        let best = toKm({ lat: alert.current.lat, lon: alert.current.lon }, { lat: nearest.lat, lon: nearest.lon });
+        for (const s of sameSpecies.slice(1)) {
+            const d = toKm({ lat: alert.current.lat, lon: alert.current.lon }, { lat: s.lat, lon: s.lon });
+            if (d < best) { best = d; nearest = s; }
+        }
+        thumb = nearest.image_url;
+    }
+    return (
+        <View style={styles.alertItem}>
+            {thumb ? <Image source={{ uri: thumb }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 10 }} /> : <Text style={styles.alertEmoji}>{alert.emoji}</Text>}
+            <View style={styles.alertContent}>
+                <Text style={styles.alertName}>{alert.common}</Text>
+                <Text style={styles.alertDistance}>{alert.current.dist_km} km away near {alert.current.addr?.split(',').slice(0, 2).join(',') || 'Unknown location'}</Text>
+            </View>
         </View>
-    </View>
-);
+    );
+};
 
 // --- Main Dashboard Component ---
 interface DashboardProps {
@@ -124,11 +148,12 @@ interface DashboardProps {
     nearbyRadiusKm: number;
     safeRoute: Route | null;
     weather: WeatherData | null;
+    recentSightings?: Array<{ id: string; name: string; scientificName: string; emoji?: string; lat: number; lon: number; date: string; address?: string; image_url?: string }>;
     onNavigate: (view: ViewType) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
-    const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate } = props;
+    const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate, recentSightings = [] } = props;
 
     const dashboardStats = useMemo(() => {
         const nearbyAlerts = predictions.filter((p: AnimalPrediction) => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
@@ -152,6 +177,32 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
     }, [predictions, user, safeRoute]);
 
     const greeting = getGreeting();
+    const displaySightings = useMemo(() => {
+        const predAsSightings = predictions.map((p) => ({
+            id: `pred-${p.id}`,
+            name: p.common,
+            scientificName: p.scientific,
+            emoji: p.emoji,
+            image_url: p.image,
+            lat: p.current.lat,
+            lon: p.current.lon,
+            date: new Date().toISOString(),
+            address: p.current.addr
+        }));
+        const merged = [...recentSightings, ...predAsSightings];
+        const seen = new Set<string>();
+        const unique = [];
+        for (const s of merged) {
+            const key = `${(s.name || '').toLowerCase()}|${(s.address || '').toLowerCase()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            unique.push(s);
+        }
+        return unique;
+    }, [recentSightings, predictions]);
+
+    const [selectedAlert, setSelectedAlert] = React.useState<AnimalPrediction | null>(null);
+    const [selectedSighting, setSelectedSighting] = React.useState<{ id: string; name: string; scientificName: string; emoji?: string; image_url?: string; date: string; address?: string } | null>(null);
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -205,6 +256,31 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                         <StatCard icon={<ChartIcon width={24} height={24} color="#059669" />} value={dashboardStats.totalSightings} label="Total Sights" />
                     </View>
 
+                    <View style={styles.alertsSection}>
+                        <Text style={styles.sectionTitle}>Sightings by Species</Text>
+                        <View style={styles.alertsList}>
+                            {displaySightings.length > 0 ? (
+                                Object.entries(displaySightings.reduce((acc: Record<string, number>, s) => {
+                                    acc[s.name] = (acc[s.name] || 0) + 1;
+                                    return acc;
+                                }, {})).map(([name, count]) => (
+                                    <View key={name} style={styles.alertItem}>
+                                        <Text style={styles.alertEmoji}>🐾</Text>
+                                        <View style={styles.alertContent}>
+                                            <Text style={styles.alertName}>{name}</Text>
+                                            <Text style={styles.alertDistance}>{count} recent sighting{count === 1 ? '' : 's'}</Text>
+                                        </View>
+                                    </View>
+                                ))
+                            ) : (
+                                <View style={styles.noAlerts}>
+                                    <Text style={styles.noAlertsText}>No species sightings yet.</Text>
+                                    <Text style={styles.noAlertsSubtext}>Open Map to load recent wildlife in your area.</Text>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+
                     <View style={styles.buttonContainer}>
                         <TouchableOpacity 
                             style={styles.primaryButton} 
@@ -222,10 +298,36 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                     </View>
 
                     <View style={styles.alertsSection}>
+                        <Text style={styles.sectionTitle}>Recent Wildlife Sightings</Text>
+                        <View style={styles.alertsList}>
+                            {displaySightings.length > 0 ? (
+                                displaySightings.map((s) => (
+                                    <TouchableOpacity key={s.id} style={styles.alertItem} onPress={() => setSelectedSighting(s)}>
+                                        {s.image_url ? <Image source={{ uri: s.image_url }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 10 }} /> : <Text style={styles.alertEmoji}>{s.emoji || '🐾'}</Text>}
+                                        <View style={styles.alertContent}>
+                                            <Text style={styles.alertName}>{s.name}</Text>
+                                            <Text style={styles.alertDistance}>{s.address?.split(',').slice(0,2).join(', ') || new Date(s.date).toLocaleString()}</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))
+                            ) : (
+                                <View style={styles.noAlerts}>
+                                    <Text style={styles.noAlertsText}>No sightings loaded yet.</Text>
+                                    <Text style={styles.noAlertsSubtext}>Open Map to load recent wildlife in your area.</Text>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+
+                    <View style={styles.alertsSection}>
                         <Text style={styles.sectionTitle}>Recent Wildlife Alerts</Text>
                         <View style={styles.alertsList}>
                             {dashboardStats.alerts.length > 0 ? (
-                                dashboardStats.alerts.map((alert: AnimalPrediction) => <AlertItem key={alert.id} alert={alert} />)
+                                dashboardStats.alerts.map((alert: AnimalPrediction) => (
+                                    <TouchableOpacity key={alert.id} onPress={() => setSelectedAlert(alert)}>
+                                        <AlertItem alert={alert} recentSightings={recentSightings} />
+                                    </TouchableOpacity>
+                                ))
                             ) : (
                                 <View style={styles.noAlerts}>
                                     <Text style={styles.noAlertsText}>No recent wildlife alerts in your area.</Text>
@@ -235,6 +337,31 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                         </View>
                     </View>
                 </>
+            )}
+            {selectedAlert && <AnimalDetailModal animal={selectedAlert} onClose={() => setSelectedAlert(null)} />}
+            {selectedSighting && (
+                <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setSelectedSighting(null)}>
+                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedSighting(null)}>
+                        <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+                            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827' }}>{selectedSighting.name}</Text>
+                                <Text style={{ fontSize: 14, color: '#6b7280' }}>{selectedSighting.address || new Date(selectedSighting.date).toLocaleString()}</Text>
+                            </View>
+                            <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+                                {selectedSighting.image_url && (
+                                    <Image source={{ uri: selectedSighting.image_url }} style={{ width: '100%', height: 200, borderRadius: 8 }} resizeMode="cover" />
+                                )}
+                                <Text style={{ fontSize: 14, color: '#111827' }}>Species: {selectedSighting.scientificName}</Text>
+                                <Text style={{ fontSize: 14, color: '#6b7280' }}>Date: {new Date(selectedSighting.date).toLocaleString()}</Text>
+                            </ScrollView>
+                            <View style={{ padding: 16 }}>
+                                <TouchableOpacity style={styles.primaryButton} onPress={() => { setSelectedSighting(null); onNavigate(ViewType.MAP); }}>
+                                    <Text style={styles.primaryButtonText}>Open in Map</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
             )}
         </ScrollView>
     );
@@ -479,6 +606,20 @@ const styles = StyleSheet.create({
     noAlertsSubtext: {
         fontSize: 12,
         color: '#9ca3af',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    modalCard: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        width: '100%',
+        maxWidth: 520,
+        maxHeight: '80%',
     },
 });
 

@@ -1,12 +1,15 @@
-import { db } from './firebase';
+ import { db } from './firebase';
 import { 
   collection, 
   query, 
   orderBy, 
   limit, 
   getDocs,
-  Timestamp 
+  Timestamp,
+  doc,
+  setDoc
 } from 'firebase/firestore';
+import { ANIMALS } from '../constants';
 
 export interface FirestoreSighting {
   id: string;
@@ -52,3 +55,22 @@ export const fetchLatestSightings = async (limitCount: number = 10): Promise<Fir
 };
 
 export default db;
+
+export const syncAnimalsFromConstants = async (): Promise<void> => {
+  try {
+    const entries = Object.entries(ANIMALS);
+    for (const [scientific, info] of entries) {
+      const payload = {
+        scientific,
+        common: info.common,
+        emoji: info.emoji,
+        color: info.color,
+        image_url: null,
+        updated_at: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'animals', scientific), payload, { merge: true });
+    }
+  } catch (error) {
+    console.error('[FirestoreService] Failed syncing animals:', error);
+  }
+};

@@ -100,6 +100,15 @@ export interface Report {
     location: string;
     description: string;
     timestamp: string;
+    imageUri?: string;
+    lat?: number;
+    lon?: number;
+    ai?: {
+        common?: string;
+        scientific?: string;
+        risk?: string;
+        summary?: string;
+    };
 }
 
 export interface User {

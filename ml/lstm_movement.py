@@ -61,38 +61,66 @@ def prepare_lstm_data(records):
 
     df = df.sort_values(["animal", "eventDate"])
     
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    df[['lat_scaled', 'lon_scaled']] = scaler.fit_transform(df[['lat', 'lon']])
-    
-    # Save scaler for inference
-    joblib.dump(scaler, SCALER_PATH)
-    
+    # Calculate Deltas (Displacements) instead of Absolute Coordinates
+    # This makes the model translation-invariant (works anywhere)
     sequences = {}
     stats = {"reason": None, "animals": {}}
-    
+    all_deltas = []
+
     for animal, group in df.groupby('animal'):
-        group = group.drop_duplicates(subset=["eventDate", "lat_scaled", "lon_scaled"])
+        group = group.drop_duplicates(subset=["eventDate", "lat", "lon"])
         total_points = int(len(group))
-        min_required = max(MIN_SAMPLES_FOR_LSTM, WINDOW_SIZE + 1)
+        min_required = max(MIN_SAMPLES_FOR_LSTM, WINDOW_SIZE + 2) # +2 because differencing reduces size by 1
         stats["animals"][animal] = {"points": total_points, "min_required": int(min_required), "sequences": 0}
 
         if total_points < min_required:
             continue
             
-        group_data = group[['lat_scaled', 'lon_scaled']].values
-        X_animal, y_animal = [], []
+        # Get coordinates
+        coords = group[['lat', 'lon']].values
         
-        for i in range(len(group_data) - WINDOW_SIZE):
-            X_animal.append(group_data[i:i + WINDOW_SIZE])
-            y_animal.append(group_data[i + WINDOW_SIZE])
+        # Calculate differences (deltas)
+        # delta[i] = coords[i] - coords[i-1]
+        deltas = np.diff(coords, axis=0)
+        
+        all_deltas.append(deltas)
+        
+        X_animal, y_animal = [], []
+        # Create sequences from deltas
+        # We need WINDOW_SIZE deltas to predict next delta
+        for i in range(len(deltas) - WINDOW_SIZE):
+            X_animal.append(deltas[i:i + WINDOW_SIZE])
+            y_animal.append(deltas[i + WINDOW_SIZE])
             
         if X_animal:
             sequences[animal] = (np.array(X_animal), np.array(y_animal))
             stats["animals"][animal]["sequences"] = int(len(X_animal))
-            
+
     if not sequences:
         stats["reason"] = "insufficient_sequences"
+        return {}, None, stats
 
+    # Global Scaler for Deltas
+    # Concatenate all deltas to fit the scaler
+    if all_deltas:
+        flat_deltas = np.concatenate(all_deltas, axis=0)
+        scaler = MinMaxScaler(feature_range=(-1, 1)) # Deltas can be negative
+        scaler.fit(flat_deltas)
+        joblib.dump(scaler, SCALER_PATH)
+    else:
+        return {}, None, stats
+
+    # Normalize sequences
+    for animal in sequences:
+        X, y = sequences[animal]
+        # Reshape for scaling: (N * Window, 2)
+        X_shape = X.shape
+        X_flat = X.reshape(-1, 2)
+        X_scaled = scaler.transform(X_flat).reshape(X_shape)
+        
+        y_scaled = scaler.transform(y)
+        sequences[animal] = (X_scaled, y_scaled)
+            
     return sequences, scaler, stats
 
 def build_lstm_model(input_shape):

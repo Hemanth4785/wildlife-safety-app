@@ -37,8 +37,9 @@ This project uses Python for backend data fetching and ML prediction. To set up 
 
 2. **ML Environment (`lstm_env`)**:
    Required for LSTM movement prediction and Random Forest risk classification.
+   **IMPORTANT:** Must use **Python 3.10** for TensorFlow compatibility.
    ```bash
-   python -m venv lstm_env
+   py -3.10 -m venv lstm_env
    # Windows
    .\lstm_env\Scripts\activate
    # Mac/Linux
@@ -46,3 +47,7 @@ This project uses Python for backend data fetching and ML prediction. To set up 
    
    pip install -r ml/requirements.txt
    ```
+
+## Detailed Run Guide
+
+For step-by-step operational instructions (including data fetching and model training), please read [RUN_INSTRUCTIONS.md](RUN_INSTRUCTIONS.md).

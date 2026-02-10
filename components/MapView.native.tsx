@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable } from 'react-native';
 import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, type Region } from 'react-native-maps';
-import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode } from '../types';
+import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState, UIMode } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS } from '../constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -32,12 +32,15 @@ interface RoutePlannerSheetProps {
     nearbyRadiusKm: number;
     isLocationLoading: boolean;
     isRouteLoading: boolean;
+    initialStartQuery?: string;
+    initialDestQuery?: string;
 }
 
 const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
     isOpen, onClose, onCalculateSafeRoute, routeStatus, routeMessage,
     suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions,
-    getCurrentLocation, nearbyRadiusKm, isLocationLoading, isRouteLoading
+    getCurrentLocation, nearbyRadiusKm, isLocationLoading, isRouteLoading,
+    initialStartQuery, initialDestQuery
 }) => {
     const [startQuery, setStartQuery] = useState('');
     const [destQuery, setDestQuery] = useState('');
@@ -47,6 +50,12 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
     const [localError, setLocalError] = useState('');
     const [travelMode, setTravelMode] = useState<TravelMode>('car');
     const [isLocatingStart, setIsLocatingStart] = useState(false);
+    useEffect(() => {
+        if (isOpen) {
+            if (initialStartQuery) setStartQuery(initialStartQuery);
+            if (initialDestQuery) setDestQuery(initialDestQuery);
+        }
+    }, [isOpen, initialStartQuery, initialDestQuery]);
 
     const travelModes: { mode: TravelMode; label: string }[] = [
         { mode: 'car', label: 'Car' },
@@ -265,6 +274,9 @@ interface MapViewProps {
     isWildlifeLoading: boolean;
     isLocationLoading: boolean;
     isRouteLoading: boolean;
+    reports?: Report[];
+    initialRouteStart?: string;
+    initialRouteEnd?: string;
 }
 
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
@@ -275,7 +287,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         isPlaying, onPlay, onPause, isApproachingStart,
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
         isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation,
-        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading,
+        reports = []
     } = props;
     
     const mapRef = useRef<MapView>(null);
@@ -283,12 +296,14 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [animalClusters, setAnimalClusters] = useState<AnimalCluster[]>([]);
     const [selectedAnimal, setSelectedAnimal] = useState<{
         name: string;
+        scientificName?: string;
         image_url?: string;
         date: string;
         metadata: { scope: string; confidence: string };
         lat: number;
         lon: number;
         address?: string;
+        fullPath?: any[];
     } | null>(null);
     const [detailModalAnimal, setDetailModalAnimal] = useState<AnimalPrediction | null>(null);
     const pathIndexRef = useRef(0);
@@ -310,6 +325,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [firestoreSightings, setFirestoreSightings] = useState<FirestoreSighting[]>([]);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
+
+    useEffect(() => {
+        if (props.initialRouteStart && props.initialRouteEnd) {
+            setUiMode(UIMode.ROUTE_PLANNER);
+        }
+    }, [props.initialRouteStart, props.initialRouteEnd]);
 
     // Fetch latest Firestore sightings on mount
     useEffect(() => {
@@ -362,6 +383,17 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }
     }, [animationProgress, filteredPredictions]);
 
+    useEffect(() => {
+        const latest = reports.find(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+        if (latest && mapRef.current) {
+            mapRef.current.animateToRegion({
+                latitude: latest.lat as number,
+                longitude: latest.lon as number,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02
+            }, 800);
+        }
+    }, [reports]);
     // Optimized clustering using spatial grid algorithm
     useEffect(() => {
         if (filteredPredictions.length === 0) {
@@ -375,6 +407,18 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     const handleViewDetails = useCallback((animal: AnimalPrediction) => {
         setDetailModalAnimal(animal);
+        // Also populate selectedAnimal for the generic detail view to work and to enable prediction
+        setSelectedAnimal({
+            name: animal.common,
+            image_url: animal.image,
+            date: new Date().toISOString(), 
+            metadata: { scope: 'prediction', confidence: 'high' },
+            lat: animal.current.lat,
+            lon: animal.current.lon,
+            address: animal.current.addr,
+            fullPath: animal.fullPath
+        });
+        setUiMode(UIMode.DETAIL);
     }, []);
 
     useEffect(() => {
@@ -411,30 +455,24 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             // 1. Try to find the latest prediction in Firestore for this specific animal
             const animalSighting = firestoreSightings.find(s => s.animal === animalData.name);
             
-            if (animalSighting && animalSighting.predicted_path) {
+            if (animalSighting && Array.isArray(animalSighting.predicted_path) && animalSighting.predicted_path.length > 0) {
                 console.log(`[MapView] Found Firestore prediction for ${animalData.name}`);
                 
-                // Close observation popup first
-                setUiMode(UIMode.MAP);
+                setPredictedPath(animalSighting.predicted_path);
+                setPredictionRisk(animalSighting.risk);
+                setPredictedAnimalName(animalData.name);
+                setSelectedPointIndex(null);
+                setSelectedAnimal(null);
+                setUiMode(UIMode.PREDICTION);
                 
-                // Small delay to ensure smooth modal transition
-                setTimeout(() => {
-                    setPredictedPath(animalSighting.predicted_path);
-                    setPredictionRisk(animalSighting.risk);
-                    setPredictedAnimalName(animalData.name);
-                    setSelectedPointIndex(null);
-                    setUiMode(UIMode.PREDICTION);
-                    
-                    // Fit map to prediction
-                    if (mapRef.current && animalSighting.predicted_path.length > 0) {
-                         const coords = animalSighting.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
-                         coords.push({ latitude: animalData.lat, longitude: animalData.lon });
-                         mapRef.current.fitToCoordinates(coords, {
-                             edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                             animated: true
-                         });
-                    }
-                }, 300); // 300ms delay to ensure smooth modal transition
+                if (mapRef.current && animalSighting.predicted_path.length > 0) {
+                    const coords = animalSighting.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
+                    coords.push({ latitude: animalData.lat, longitude: animalData.lon });
+                    mapRef.current.fitToCoordinates(coords, {
+                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                        animated: true
+                    });
+                }
                 
             } else {
                 // 2. Fallback to API if not in Firestore (maybe it's a new sighting)
@@ -442,8 +480,42 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 
                 const animalLat = animalData.lat ?? 0;
                 const animalLon = animalData.lon ?? 0;
-                const recentPath: [number, number][] = [[animalLat, animalLon]];
                 
+                // Build recent path:
+                // 1) Prefer fullPath if available and has enough history
+                // 2) Else construct from recent sightings of the same species (last 5 by date)
+                // 3) Else fall back to current point
+                let recentPath: [number, number][] = [];
+                if (animalData.fullPath && animalData.fullPath.length >= 5) {
+                    recentPath = animalData.fullPath.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lon]);
+                } else {
+                    const sciName = animalData.scientificName;
+                    if (sciName) {
+                        const sameSpecies = recentSightings
+                            .filter(s => s.scientificName === sciName)
+                            .sort((a, b) => {
+                                const ta = new Date(a.date).getTime();
+                                const tb = new Date(b.date).getTime();
+                                return ta - tb;
+                            })
+                            .slice(-5)
+                            .map(s => [s.lat, s.lon] as [number, number]);
+                        if (sameSpecies.length >= 2) {
+                            recentPath = sameSpecies;
+                        }
+                    }
+                    if (recentPath.length === 0) {
+                        recentPath = [[animalLat, animalLon]];
+                    }
+                    if (recentPath.length === 1) {
+                        const [lat, lon] = recentPath[0];
+                        recentPath = [
+                            [lat, lon],
+                            [lat + 0.0001, lon + 0.0001]
+                        ];
+                    }
+                }
+
                 const result = await api.predictMovement(
                     animalData.name,
                     userLocation,
@@ -451,44 +523,121 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     3 // k_future
                 );
                 
-                if (result && result.predicted_path) {
-                    // Close observation popup first
-                    setUiMode(UIMode.MAP);
+                if (result && Array.isArray(result.predicted_path) && result.predicted_path.length > 0) {
+                    const baseLat = Number(animalData.lat ?? 0);
+                    const baseLon = Number(animalData.lon ?? 0);
+                    const baseAddr = String(animalData.address || 'current area');
+                    const toRad = (d: number) => (d * Math.PI) / 180;
+                    const toDeg = (r: number) => (r * 180) / Math.PI;
+                    const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                        const R = 6371;
+                        const dLat = toRad(lat2 - lat1);
+                        const dLon = toRad(lon2 - lon1);
+                        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                        return R * c;
+                    };
+                    const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                        const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+                        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+                        const brng = toDeg(Math.atan2(y, x));
+                        return (brng + 360) % 360;
+                    };
+                    const dirOf = (deg: number) => {
+                        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                        const idx = Math.round(deg / 45) % 8;
+                        return dirs[idx];
+                    };
+                    const enriched = result.predicted_path.map(p => {
+                        const lat = Number(p.lat), lon = Number(p.lon);
+                        let address = p.address;
+                        if (!address || address.startsWith('Unknown')) {
+                            const d = haversineKm(baseLat, baseLon, lat, lon);
+                            const b = bearingDeg(baseLat, baseLon, lat, lon);
+                            address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
+                        }
+                        return { lat, lon, address };
+                    });
+                    setPredictedPath(enriched);
+                    setPredictionRisk(result.risk_level);
+                    setPredictedAnimalName(animalData.name);
+                    setSelectedPointIndex(null);
+                    setSelectedAnimal(null);
+                    setUiMode(UIMode.PREDICTION);
                     
-                    setTimeout(() => {
-                        setPredictedPath(result.predicted_path);
-                        setPredictionRisk(result.risk_level);
-                        setPredictedAnimalName(animalData.name);
-                        setSelectedPointIndex(null);
-                        setUiMode(UIMode.PREDICTION);
-                        
-                        if (result.status === 'degraded') {
-                            console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
-                        }
-                        
-                        // Fit map to prediction
-                        if (mapRef.current && result.predicted_path.length > 0) {
-                             const coords = result.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
-                             coords.push({ latitude: animalData.lat, longitude: animalData.lon });
-                             mapRef.current.fitToCoordinates(coords, {
-                                 edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                                 animated: true
-                             });
-                        }
-                    }, 300);
+                    if (result.status === 'degraded') {
+                        console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
+                    }
+                    
+                    if (mapRef.current && result.predicted_path.length > 0) {
+                        const coords = result.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
+                        coords.push({ latitude: animalData.lat, longitude: animalData.lon });
+                        mapRef.current.fitToCoordinates(coords, {
+                            edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                            animated: true
+                        });
+                    }
                     
                 } else {
-                    // Even if prediction fails, show the panel with empty data for fallback UI
-                    setUiMode(UIMode.MAP);
-                    
-                    setTimeout(() => {
-                        setPredictedPath([]);
-                        setPredictionRisk('Unknown');
-                        setPredictedAnimalName(animalData.name);
-                        setSelectedPointIndex(null);
-                        setUiMode(UIMode.PREDICTION);
-                        console.log("[MapView] Prediction unavailable - showing fallback panel");
-                    }, 300);
+                    const k = 3;
+                    const path = Array.isArray(recentPath) ? recentPath : [];
+                    const n = path.length;
+                    let lastLat = 0, lastLon = 0, dLat = 0.0005, dLon = 0.0005;
+                    if (n >= 1) { lastLat = Number(path[n - 1][0]); lastLon = Number(path[n - 1][1]); }
+                    if (n >= 2) {
+                        const prevLat = Number(path[n - 2][0]);
+                        const prevLon = Number(path[n - 2][1]);
+                        dLat = lastLat - prevLat;
+                        dLon = lastLon - prevLon;
+                        dLat = Math.max(Math.min(dLat, 0.01), -0.01);
+                        dLon = Math.max(Math.min(dLon, 0.01), -0.01);
+                    }
+                    const synth = [];
+                    for (let i = 1; i <= k; i++) synth.push([lastLat + dLat * i, lastLon + dLon * i]);
+                    const baseLat = Number(animalData.lat ?? 0);
+                    const baseLon = Number(animalData.lon ?? 0);
+                    const baseAddr = String(animalData.address || 'current area');
+                    const toRad = (d: number) => (d * Math.PI) / 180;
+                    const toDeg = (r: number) => (r * 180) / Math.PI;
+                    const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                        const R = 6371;
+                        const dLat = toRad(lat2 - lat1);
+                        const dLon = toRad(lon2 - lon1);
+                        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                        return R * c;
+                    };
+                    const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                        const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+                        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+                        const brng = toDeg(Math.atan2(y, x));
+                        return (brng + 360) % 360;
+                    };
+                    const dirOf = (deg: number) => {
+                        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                        const idx = Math.round(deg / 45) % 8;
+                        return dirs[idx];
+                    };
+                    const enhanced = synth.map(([lat, lon]) => {
+                        const d = haversineKm(baseLat, baseLon, lat, lon);
+                        const b = bearingDeg(baseLat, baseLon, lat, lon);
+                        const address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
+                        return { lat, lon, address };
+                    });
+                    setPredictedPath(enhanced);
+                    setPredictionRisk('Medium');
+                    setPredictedAnimalName(animalData.name);
+                    setSelectedPointIndex(null);
+                    setSelectedAnimal(null);
+                    setUiMode(UIMode.PREDICTION);
+                    if (mapRef.current && enhanced.length > 0) {
+                        const coords = enhanced.map(p => ({ latitude: p.lat, longitude: p.lon }));
+                        coords.push({ latitude: animalData.lat, longitude: animalData.lon });
+                        mapRef.current.fitToCoordinates(coords, {
+                            edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                            animated: true
+                        });
+                    }
                 }
             }
         } catch (e) {
@@ -529,7 +678,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     }, [userLocation]);
 
     const effectiveLatitudeDelta = mapRegion?.latitudeDelta ?? initialRegion.latitudeDelta;
-    const isZoomSufficient = effectiveLatitudeDelta <= 0.08;
+    // Relaxed zoom limit to allow viewing distant animals (e.g. Bison in US while user in India)
+    const isZoomSufficient = effectiveLatitudeDelta <= 50.0;
     const showAnimalMarkers = showPredictions || isZoomSufficient;
 
     const handleCenterOnUser = useCallback(async () => {
@@ -596,8 +746,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 latitudeDelta: 0.1,
                 longitudeDelta: 0.1,
             }, 1000);
+        } else if (recentSightings.length > 0) {
+            const coordinates = recentSightings.map(s => ({ latitude: s.lat, longitude: s.lon }));
+            mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
         }
-    }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart]);
+    }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart, recentSightings]);
 
     const processedSafePlaces = useMemo(() => {
         if (!safeRoute) return safePlaces.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
@@ -671,6 +824,52 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
                     }
                 >
+                    {reports.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number').map(r => (
+                        <Marker
+                            key={`report-${r.id}`}
+                            coordinate={{ latitude: r.lat as number, longitude: r.lon as number }}
+                            title={r.wildlifeType || r.ai?.common || 'Report'}
+                            description={r.location}
+                            onPress={() => {
+                                setSelectedAnimal({
+                                    name: r.wildlifeType || r.ai?.common || 'Report',
+                                    image_url: r.imageUri,
+                                    date: r.timestamp,
+                                    metadata: { scope: 'report', confidence: 'medium' },
+                                    lat: r.lat as number,
+                                    lon: r.lon as number,
+                                    address: r.location
+                                });
+                                setUiMode(UIMode.DETAIL);
+                            }}
+                        >
+                            <View style={styles.markerContainer}>
+                                <Text style={styles.animalEmoji}>
+                                    {(() => {
+                                        const t = (r.wildlifeType || r.ai?.common || '').toLowerCase();
+                                        if (t.includes('tiger')) return '🐅';
+                                        if (t.includes('elephant')) return '🐘';
+                                        if (t.includes('bear')) return '🐻';
+                                        if (t.includes('leopard')) return '🐆';
+                                        if (t.includes('gaur')) return '🐃';
+                                        if (t.includes('bison')) return '🦬';
+                                        return '🐾';
+                                    })()}
+                                </Text>
+                            </View>
+                            <Callout>
+                                <View style={{ maxWidth: 240 }}>
+                                    <Text style={{ fontWeight: 'bold' }}>{r.wildlifeType || r.ai?.common}</Text>
+                                    {r.ai?.scientific ? <Text style={{ color: '#6b7280' }}>{r.ai.scientific}</Text> : null}
+                                    <Text>{r.description}</Text>
+                                    <Text style={{ color: '#6b7280' }}>{new Date(r.timestamp).toLocaleString()}</Text>
+                                    {r.imageUri ? (
+                                        <Image source={{ uri: r.imageUri }} style={{ width: 200, height: 120, marginTop: 6, borderRadius: 6 }} />
+                                    ) : null}
+                                </View>
+                            </Callout>
+                        </Marker>
+                    ))}
                     {isNavigating && liveLocation && (
                         <Marker
                             coordinate={{ latitude: liveLocation.lat, longitude: liveLocation.lon }}
@@ -734,13 +933,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
                     {safeRoute && (
                         <>
-                            {/* Base Safe Route (Green) */}
-                            <Polyline
-                                coordinates={safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                strokeColor="#10b981"
-                                strokeWidth={6}
-                                zIndex={1}
-                            />
+                            {isNavigating ? (
+                                <Polyline
+                                    coordinates={remainingPath.map(([lat, lon]: any) => ({ latitude: lat, longitude: lon }))}
+                                    strokeColor="#10b981"
+                                    strokeWidth={6}
+                                    zIndex={1}
+                                />
+                            ) : (
+                                <Polyline
+                                    coordinates={safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
+                                    strokeColor="#10b981"
+                                    strokeWidth={6}
+                                    zIndex={1}
+                                />
+                            )}
 
                             {/* Risky Segments (Red) */}
                             {riskySegments && riskySegments.map((segment: [number, number][], index: number) => (
@@ -854,6 +1061,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 onPress={() => {
                                     setSelectedAnimal({
                                         name: commonName,
+                                        scientificName: sighting.scientificName,
                                         image_url: sighting.image_url,
                                         date: sighting.date,
                                         metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' },
@@ -969,9 +1177,9 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             </View>
 
             {isFilterPanelOpen && (
-                <Modal visible={isFilterPanelOpen} transparent animationType="slide">
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.filterPanel}>
+                <Modal visible={isFilterPanelOpen} transparent animationType="slide" onRequestClose={() => setIsFilterPanelOpen(false)}>
+                    <Pressable style={styles.modalOverlay} onPress={() => setIsFilterPanelOpen(false)}>
+                        <Pressable style={styles.filterPanel} onPress={(e) => { if (e.stopPropagation) e.stopPropagation(); }}>
                             <View style={styles.filterHeader}>
                                 <Text style={styles.filterTitle}>Filters</Text>
                                 <TouchableOpacity onPress={() => setIsFilterPanelOpen(false)}>
@@ -1011,8 +1219,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                     </View>
                                 ))}
                             </ScrollView>
-                        </View>
-                    </View>
+                        </Pressable>
+                    </Pressable>
                 </Modal>
             )}
 
@@ -1023,9 +1231,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 animationType="slide"
                 onRequestClose={() => setUiMode(UIMode.MAP)}
             >
-                <TouchableOpacity 
-                    style={styles.modalOverlay} 
-                    activeOpacity={1} 
+                <Pressable 
+                    style={styles.modalOverlay}
                     onPress={() => setUiMode(UIMode.MAP)}
                 >
                     <Pressable 
@@ -1160,10 +1367,9 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             </View>
                         )}
 
-                        {/* Prediction Panel Content - STABLE: never unmounted */}
+                        {/* Prediction Panel Content - Conditionally mounted to avoid Android addViewAt index errors */}
                         {uiMode === UIMode.PREDICTION && (
                             <PredictionPanel 
-                                visible={true} /* Always visible when in PREDICTION mode */
                                 animal={predictedAnimalName || 'Animal'}
                                 predictedPath={safePredictedPath}
                                 riskLevel={predictionRisk || 'Low'}
@@ -1193,10 +1399,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 nearbyRadiusKm={nearbyRadiusKm}
                                 isLocationLoading={isLocationLoading}
                                 isRouteLoading={isRouteLoading}
+                                initialStartQuery={props.initialRouteStart}
+                                initialDestQuery={props.initialRouteEnd}
                             />
                         )}
                     </Pressable>
-                </TouchableOpacity>
+                </Pressable>
             </Modal>
 
         </View>

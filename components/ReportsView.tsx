@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } from 'react-native';
 import * as Location from 'expo-location';
 import type { Report } from '../types';
 import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon } from './icons';
+import * as ImagePicker from 'expo-image-picker';
+import { reverseGeocode, analyzeReportImage, searchLocations } from '../services/apiService';
 
-const WILDLIFE_TYPES = ["Bear", "Mountain Lion", "Wolf", "Elk", "Moose", "Deer", "Coyote", "Bobcat"];
+const WILDLIFE_TYPES = ["Sloth Bear", "Tiger", "Leopard", "Asian Elephant", "Gaur", "Bison"];
 
 interface ReportsViewProps {
     reports: Report[];
@@ -17,6 +19,33 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
     const [location, setLocation] = useState('');
     const [description, setDescription] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [imageUri, setImageUri] = useState<string | undefined>(undefined);
+    const [imageData, setImageData] = useState<string | undefined>(undefined);
+    const [filterType, setFilterType] = useState<string>('All');
+    const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+    const [highlightId, setHighlightId] = useState<number | null>(null);
+    
+    useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const { storage } = await import('../utils/storage');
+                const tab = await storage.getItem<string>('reports.defaultTab');
+                if (mounted && tab === 'recent') {
+                    setActiveTab('recent');
+                }
+                await storage.removeItem('reports.defaultTab');
+                const hid = await storage.getItem<number>('reports.highlightId');
+                if (mounted && typeof hid === 'number') {
+                    setHighlightId(hid);
+                }
+                await storage.removeItem('reports.highlightId');
+            } catch {
+                // ignore
+            }
+        })();
+        return () => { mounted = false; };
+    }, []);
     
     const handleUseCurrentLocation = async () => {
         try {
@@ -30,7 +59,15 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                 accuracy: Location.Accuracy.High,
             });
             const { latitude, longitude } = position.coords;
-            setLocation(`Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}`);
+            setCoords({ lat: latitude, lon: longitude });
+            let addr = `Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}`;
+            try {
+                const r = await reverseGeocode(latitude, longitude);
+                if (r && r !== 'Address not found') {
+                    addr = `${r} (Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)})`;
+                }
+            } catch {}
+            setLocation(addr);
         } catch (error: any) {
             let errorMessage = "Could not get location. Please enter manually.";
             if (error.code === 'E_LOCATION_SERVICES_DISABLED') {
@@ -45,17 +82,89 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
         }
     };
 
+    const handlePickImage = async () => {
+        try {
+            const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!perm.granted) {
+                Alert.alert("Permission required", "Please grant photo library access.");
+                return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.7,
+                base64: true
+            });
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const a = result.assets[0];
+                setImageUri(a.uri);
+                setImageData(a.base64 ?? undefined);
+            }
+        } catch {
+            Alert.alert("Error", "Could not open photo picker.");
+        }
+    };
+    const handleCaptureImage = async () => {
+        try {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) {
+                Alert.alert("Permission required", "Please grant camera access.");
+                return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: true,
+                quality: 0.7,
+                base64: true
+            });
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const a = result.assets[0];
+                setImageUri(a.uri);
+                setImageData(a.base64 ?? undefined);
+            }
+        } catch {
+            Alert.alert("Error", "Could not open camera.");
+        }
+    };
+
     const handleSubmit = async () => {
         if (!wildlifeType || !location || !description) {
             Alert.alert("Error", "Please fill in all required fields.");
             return;
         }
+        if (!imageUri) {
+            Alert.alert("Photo required", "Please upload an animal photo before submitting.");
+            return;
+        }
         setIsSubmitting(true);
         try {
-            await onAddReport({ wildlifeType, location, description });
+            let aiInfo: { common?: string; scientific?: string; risk?: string; summary?: string } | undefined = undefined;
+            if (imageData) {
+                const res = await analyzeReportImage({ mimeType: 'image/jpeg', data: imageData });
+                if (res) {
+                    aiInfo = res;
+                    if (!wildlifeType && res.common) {
+                        setWildlifeType(res.common);
+                    }
+                }
+            }
+            let finalLat = coords?.lat;
+            let finalLon = coords?.lon;
+            if ((!finalLat || !finalLon) && location.trim().length > 0) {
+                try {
+                    const results = await searchLocations(location.trim());
+                    if (Array.isArray(results) && results.length > 0) {
+                        finalLat = results[0].lat;
+                        finalLon = results[0].lon;
+                    }
+                } catch {}
+            }
+            await onAddReport({ wildlifeType, location, description, imageUri, lat: finalLat, lon: finalLon, ai: aiInfo });
             setWildlifeType('');
             setLocation('');
             setDescription('');
+            setImageUri(undefined);
+            setImageData(undefined);
+            setCoords(null);
             setActiveTab('recent');
         } catch (error) {
             Alert.alert("Error", "Failed to submit report. Please try again.");
@@ -145,10 +254,21 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
 
                         <View style={styles.formGroup}>
                             <Text style={styles.label}>Photo (Optional)</Text>
-                            <View style={styles.photoUpload}>
-                                <CameraIcon width={48} height={48} color="#9ca3af" />
-                                <Text style={styles.photoUploadText}>Tap to upload photo</Text>
+                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <TouchableOpacity style={[styles.photoUpload, { flex: 1 }]} onPress={handlePickImage}>
+                                    <CameraIcon width={48} height={48} color="#9ca3af" />
+                                    <Text style={styles.photoUploadText}>Pick from gallery</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.photoUpload, { flex: 1 }]} onPress={handleCaptureImage}>
+                                    <CameraIcon width={48} height={48} color="#9ca3af" />
+                                    <Text style={styles.photoUploadText}>Capture with camera</Text>
+                                </TouchableOpacity>
                             </View>
+                            {imageUri ? (
+                                <View style={{ marginTop: 12 }}>
+                                    <Image source={{ uri: imageUri }} style={{ width: '100%', height: 160, borderRadius: 8 }} />
+                                </View>
+                            ) : null}
                         </View>
 
                         <TouchableOpacity 
@@ -170,8 +290,26 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                     </View>
                 ) : (
                     <View style={styles.reportsList}>
-                        {reports.length > 0 ? reports.map(report => (
-                            <View key={report.id} style={styles.reportItem}>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                            {['All', ...WILDLIFE_TYPES].map(t => (
+                                <TouchableOpacity
+                                    key={t}
+                                    onPress={() => setFilterType(t)}
+                                    style={[
+                                        styles.typeButton,
+                                        filterType === t && styles.typeButtonActive
+                                    ]}
+                                >
+                                    <Text style={[styles.typeButtonText, filterType === t && styles.typeButtonTextActive]}>
+                                        {t}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                        {reports.length > 0 ? reports
+                            .filter(r => filterType === 'All' ? true : r.wildlifeType === filterType)
+                            .map(report => (
+                            <View key={report.id} style={[styles.reportItem, highlightId === report.id ? { borderColor: '#059669' } : null]}>
                                 <View style={styles.reportHeader}>
                                     <Text style={styles.reportType}>{report.wildlifeType}</Text>
                                     <Text style={styles.reportDate}>
@@ -183,6 +321,24 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                                     {report.location}
                                 </Text>
                                 <Text style={styles.reportDescription}>{report.description}</Text>
+                                {report.ai ? (
+                                    <View style={{ marginTop: 8, backgroundColor: '#f3f4f6', padding: 8, borderRadius: 6 }}>
+                                        <Text style={{ fontWeight: '600', color: '#111827' }}>
+                                            Identified: {report.ai.common || 'Unknown'}{report.ai.scientific ? ` (${report.ai.scientific})` : ''}
+                                        </Text>
+                                        {report.ai.summary ? (
+                                            <Text style={{ color: '#374151', marginTop: 4 }}>{report.ai.summary}</Text>
+                                        ) : null}
+                                        {report.ai.risk ? (
+                                            <Text style={{ color: '#6b7280', marginTop: 4 }}>Risk: {report.ai.risk}</Text>
+                                        ) : null}
+                                    </View>
+                                ) : null}
+                                {report.imageUri ? (
+                                    <View style={{ marginTop: 8 }}>
+                                        <Image source={{ uri: report.imageUri }} style={{ width: '100%', height: 160, borderRadius: 8 }} />
+                                    </View>
+                                ) : null}
                             </View>
                         )) : (
                             <View style={styles.emptyState}>

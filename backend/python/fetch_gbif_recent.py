@@ -18,26 +18,25 @@ CACHE_DIR = os.path.abspath(os.path.join(BASE_DIR, "cache"))
 OUTPUT_FILE = os.path.abspath(os.path.join(CACHE_DIR, "gbif_recent.json"))
 GBIF_API_URL = "https://api.gbif.org/v1/occurrence/search"
 
-# Exactly 5 animals: scientific name -> (common name, emoji)
+# Exactly 6 animals: scientific name -> (common name, emoji)
 SPECIES = [
     ("Elephas maximus", "Asian Elephant", "\U0001F418"),
     ("Panthera tigris", "Tiger", "\U0001F405"),
     ("Panthera pardus", "Leopard", "\U0001F406"),
     ("Bos gaurus", "Gaur", "\U0001F9AC"),
     ("Melursus ursinus", "Sloth Bear", "\U0001F43B"),
+    ("Bison bison", "Bison", "\U0001F9AC"),
 ]
 
 # ---------------- DATE HANDLING ---------------- #
 
 def get_date_range():
     """
-    Returns a GBIF-safe rolling date range.
-    Uses modern timezone-aware objects to avoid DeprecationWarnings.
+    Returns a GBIF-safe date range from 2022-01-01 to yesterday.
     """
-    # Use timezone-aware UTC now
     today = datetime.now(timezone.utc).date()
-    end_date = today - timedelta(days=1)          # GBIF-safe (yesterday)
-    start_date = end_date - timedelta(days=90)    # last 90 days
+    end_date = today - timedelta(days=1)
+    start_date = datetime(2022, 1, 1, tzinfo=timezone.utc).date()
     return f"{start_date.isoformat()},{end_date.isoformat()}"
 
 # ---------------- FETCH LOGIC ---------------- #
@@ -49,11 +48,12 @@ def fetch_with_retry(scientific_name, common_name, date_range, retries=3, backof
     """
     params = {
         "scientificName": scientific_name,
-        "eventDate": date_range,
         "hasCoordinate": "true",
         "occurrenceStatus": "PRESENT",
         "basisOfRecord": "OBSERVATION",
-        "limit": 10,
+        "limit": 50,
+        "sort": "lastInterpreted",
+        "eventDate": date_range
     }
 
     headers = {

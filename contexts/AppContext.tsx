@@ -10,6 +10,7 @@ import { NEARBY_KM } from '../constants';
 import * as authService from '../services/authService';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
+import { auth } from '../services/firebase';
 
 interface AppState {
   user: AppUser | null;
@@ -156,6 +157,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const updatedReports = [newReport, ...reports];
       setReports(updatedReports);
       await storage.setItem('reports', updatedReports);
+      
+      try {
+        const uid = auth.currentUser?.uid;
+        const data = {
+          ...newReport,
+          userId: uid || null,
+          created_at: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'reports', String(newReport.id)), data, { merge: true });
+      } catch (e) {
+        logger.warn('Failed to write report to Firestore; continuing with local storage', e);
+      }
     } catch (error) {
       logger.error('Add report error', error);
       throw error;

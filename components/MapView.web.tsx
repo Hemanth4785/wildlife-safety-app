@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap, CircleMarker } from 'react-leaflet';
-import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode } from '../types';
+import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS } from '../constants';
 import L from 'leaflet';
@@ -386,9 +386,11 @@ interface RoutePlannerSheetProps {
     onClearSuggestions: () => void;
     getCurrentLocation: () => Promise<Location>;
     nearbyRadiusKm: number;
+    initialStartQuery?: string;
+    initialDestQuery?: string;
 }
 const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = (props) => {
-    const { isOpen, onClose, onCalculateSafeRoute, routeStatus, routeMessage, suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation, nearbyRadiusKm } = props;
+    const { isOpen, onClose, onCalculateSafeRoute, routeStatus, routeMessage, suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation, nearbyRadiusKm, initialStartQuery, initialDestQuery } = props;
     const [startQuery, setStartQuery] = useState('');
     const [destQuery, setDestQuery] = useState('');
     const [selectedStart, setSelectedStart] = useState<Location | null>(null);
@@ -397,6 +399,12 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = (props) => {
     const [isGettingLocation, setIsGettingLocation] = useState(false);
     const [localError, setLocalError] = useState('');
     const [travelMode, setTravelMode] = useState<TravelMode>('car');
+    useEffect(() => {
+        if (isOpen) {
+            if (initialStartQuery) setStartQuery(initialStartQuery);
+            if (initialDestQuery) setDestQuery(initialDestQuery);
+        }
+    }, [isOpen, initialStartQuery, initialDestQuery]);
 
     const travelModes: { mode: TravelMode; icon: React.ReactNode; label: string }[] = [
         { mode: 'car', icon: <CarIcon className="w-6 h-6" />, label: 'Car' },
@@ -717,6 +725,9 @@ interface MapViewProps {
     onPause: () => void;
     nearbyRadiusKm: number;
     isApproachingStart: boolean;
+    reports?: Report[];
+    initialRouteStart?: string;
+    initialRouteEnd?: string;
 }
 
 const MapView: React.FC<MapViewProps> = (props) => {
@@ -724,7 +735,8 @@ const MapView: React.FC<MapViewProps> = (props) => {
         userLocation, predictions, riskZones, animationProgress, nearbyRadiusKm, 
         safeRoute, safePlaces, isNavigating, liveLocation, navigationStats, 
         onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
-        isPlaying, onPlay, onPause, isApproachingStart
+        isPlaying, onPlay, onPause, isApproachingStart,
+        reports = []
     } = props;
     
     const [isPlanningRoute, setIsPlanningRoute] = useState(false);
@@ -742,6 +754,12 @@ const MapView: React.FC<MapViewProps> = (props) => {
 
     const [recentSightings, setRecentSightings] = useState<any[]>([]);
     const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
+
+    useEffect(() => {
+        if (props.initialRouteStart && props.initialRouteEnd) {
+            setIsPlanningRoute(true);
+        }
+    }, [props.initialRouteStart, props.initialRouteEnd]);
 
     /**
      * --- NEW: LSTM Prediction States ---
@@ -810,6 +828,13 @@ const MapView: React.FC<MapViewProps> = (props) => {
         }
     }, [animationProgress, filteredPredictions]);
 
+    useEffect(() => {
+        if (!map) return;
+        const latest = (props.reports || []).find(r => typeof r.lat === 'number' && typeof r.lon === 'number');
+        if (latest) {
+            map.setView([latest.lat as number, latest.lon as number], 14);
+        }
+    }, [props.reports, map]);
     useEffect(() => {
         if (!map || filteredPredictions.length === 0) {
             setAnimalClusters([]);
@@ -952,6 +977,37 @@ const MapView: React.FC<MapViewProps> = (props) => {
                     {isNavigating && liveLocation && showNearbyRadius && (
                         <Circle center={[liveLocation.lat, liveLocation.lon]} radius={nearbyRadiusKm * 1000} pathOptions={{ color: '#f97316', weight: 1, fillOpacity: 0.1, dashArray: '5, 5' }} />
                     )}
+                    {reports.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number').map(r => {
+                        const t = (r.wildlifeType || r.ai?.common || '').toLowerCase();
+                        const emoji = t.includes('tiger') ? '🐅'
+                            : t.includes('elephant') ? '🐘'
+                            : t.includes('bear') ? '🐻'
+                            : t.includes('leopard') ? '🐆'
+                            : t.includes('gaur') ? '🐃'
+                            : t.includes('bison') ? '🦬'
+                            : '🐾';
+                        const icon = new L.DivIcon({
+                            html: `<div class="text-2xl" style="text-shadow: 0 0 4px white">${emoji}</div>`,
+                            className: 'leaflet-div-icon',
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14],
+                        });
+                        return (
+                        <Marker key={`report-${r.id}`} position={[r.lat as number, r.lon as number]} icon={icon}>
+                            <Popup>
+                                <div style={{ maxWidth: 240 }}>
+                                    <div style={{ fontWeight: 'bold' }}>{r.wildlifeType || r.ai?.common || 'Report'}</div>
+                                    {r.ai?.scientific ? <div style={{ color: '#6b7280' }}>{r.ai.scientific}</div> : null}
+                                    <div>{r.description}</div>
+                                    <div style={{ color: '#6b7280' }}>{new Date(r.timestamp).toLocaleString()}</div>
+                                    {r.imageUri ? (
+                                        <img src={r.imageUri} alt="Report" style={{ width: '100%', height: 'auto', marginTop: 6, borderRadius: 6 }} />
+                                    ) : null}
+                                </div>
+                            </Popup>
+                        </Marker>
+                        );
+                    })}
 
                     {safeRoute && (
                         <>
@@ -1141,6 +1197,8 @@ const MapView: React.FC<MapViewProps> = (props) => {
                 onClearSuggestions={props.onClearSuggestions}
                 getCurrentLocation={props.getCurrentLocation}
                 nearbyRadiusKm={props.nearbyRadiusKm}
+                initialStartQuery={props.initialRouteStart}
+                initialDestQuery={props.initialRouteEnd}
             />
             {detailModalAnimal && <AnimalDetailModal animal={detailModalAnimal} onClose={() => setDetailModalAnimal(null)} />}
         </div>

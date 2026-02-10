@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Pressable, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Pressable } from 'react-native';
 import { XIcon, InfoIcon, AlertTriangleIcon, LocationMarkerIcon, ErrorIcon } from './icons';
 
 interface PredictionPoint {
@@ -34,23 +34,15 @@ const PredictionPanel: React.FC<PredictionPanelProps> = ({
     const riskColor = isHighRisk ? '#ef4444' : (riskLower === 'medium' ? '#f59e0b' : '#10b981');
 
     return (
-        <Modal
-            visible={visible}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={onClose}
+        <View 
+            style={[
+                styles.containerOverlay, 
+                visible ? styles.visibleOverlay : styles.hiddenOverlay
+            ]}
+            pointerEvents={visible ? 'auto' : 'none'}
         >
-            <TouchableOpacity 
-                style={styles.container} 
-                activeOpacity={1} 
-                onPress={onClose}
-            >
-                <Pressable 
-                    style={styles.panel} 
-                    onPress={(e) => {
-                        if (e.stopPropagation) e.stopPropagation();
-                    }}
-                >
+            <TouchableOpacity style={styles.overlayTouch} activeOpacity={1} onPress={onClose}>
+                <Pressable style={styles.panel} onPress={(e) => { if ((e as any).stopPropagation) (e as any).stopPropagation(); }}>
                     <View style={styles.header}>
                         <View style={styles.headerTitleContainer}>
                             <InfoIcon width={20} height={20} color="#374151" />
@@ -113,14 +105,31 @@ const PredictionPanel: React.FC<PredictionPanelProps> = ({
                     </View>
                 </Pressable>
             </TouchableOpacity>
-        </Modal>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
+    containerOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+    },
+    visibleOverlay: {
         backgroundColor: 'rgba(0,0,0,0.5)',
+        opacity: 1,
+    },
+    hiddenOverlay: {
+        backgroundColor: 'transparent',
+        opacity: 0,
+    },
+    overlayTouch: {
+        flex: 1,
+        width: '100%',
         justifyContent: 'flex-end',
         alignItems: 'center',
     },

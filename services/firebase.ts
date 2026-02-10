@@ -1,8 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { initializeAuth, getReactNativePersistence, browserLocalPersistence, getAuth, setPersistence, type Auth } from 'firebase/auth';
-import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+// @ts-ignore: getReactNativePersistence is available in React Native but types might miss it in the wrapper
+import { initializeAuth, browserLocalPersistence, getAuth, setPersistence, getReactNativePersistence, type Auth } from 'firebase/auth';
 import { Platform } from 'react-native';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
  * Firebase configuration for Wildlife Safety project.
@@ -22,15 +23,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize Auth with platform-specific persistence
-const auth: Auth =
-  Platform.OS === 'web'
-    ? getAuth(app)
-    : initializeAuth(app, {
-        persistence: getReactNativePersistence(ReactNativeAsyncStorage),
-      });
+let auth: Auth;
 
 if (Platform.OS === 'web') {
+  auth = getAuth(app);
   setPersistence(auth, browserLocalPersistence).catch(() => {});
+} else {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+  });
 }
 
 export { auth };

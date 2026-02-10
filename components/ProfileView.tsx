@@ -1,15 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { User } from '../types';
+import { User, View as ViewType } from '../types';
 import { AVATARS, NEARBY_KM } from '../constants';
 import AvatarSelectionModal from './AvatarSelectionModal';
 import { EditIcon, PaperPlaneIcon, ReportIcon, ChartIcon } from './icons';
+import { useAppContext } from '../contexts/AppContext';
+import { storage } from '../utils/storage';
 
 interface ProfileViewProps {
     user: User;
     onLogout: () => void;
     onUpdateUser: (user: User) => void;
+    onNavigate: (view: ViewType) => void;
 }
 
 const StatCard: React.FC<{ icon: React.ReactNode; value: string | number; label: string }> = ({ icon, value, label }: { icon: React.ReactNode; value: string | number; label: string }) => (
@@ -20,10 +23,13 @@ const StatCard: React.FC<{ icon: React.ReactNode; value: string | number; label:
     </View>
 );
 
-const ProfileView: React.FC<ProfileViewProps> = ({ user, onLogout, onUpdateUser }: ProfileViewProps) => {
+const ProfileView: React.FC<ProfileViewProps> = ({ user, onLogout, onUpdateUser, onNavigate }: ProfileViewProps) => {
+    const { reports } = useAppContext();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isEditingName, setIsEditingName] = useState(false);
     const [editedName, setEditedName] = useState(user.name);
+    const [safeTripsCount, setSafeTripsCount] = useState<number>(0);
+    const [milesTracked, setMilesTracked] = useState<number>(0);
     
     const AvatarComponent = AVATARS[user.avatarId]?.icon || AVATARS['tiger'].icon;
 
@@ -54,6 +60,26 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, onLogout, onUpdateUser 
     };
 
     const nearbyRadius = user.nearbyRadiusKm ?? NEARBY_KM;
+
+    useEffect(() => {
+        let isMounted = true;
+        const loadStats = async () => {
+            try {
+                // Load lightweight counters if present (populated by navigation)
+                const { storage } = await import('../utils/storage');
+                const st = await storage.getItem<number>('safeTripsCount');
+                const mk = await storage.getItem<number>('milesTrackedKm');
+                if (isMounted) {
+                    setSafeTripsCount(st ?? 0);
+                    setMilesTracked(mk ?? 0);
+                }
+            } catch {
+                // defaults applied above
+            }
+        };
+        loadStats();
+        return () => { isMounted = false; };
+    }, []);
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -108,9 +134,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, onLogout, onUpdateUser 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Your Safety Journey</Text>
                 <View style={styles.statsGrid}>
-                    <StatCard icon={<PaperPlaneIcon width={24} height={24} color="#059669" />} value="47" label="Safe Trips" />
-                    <StatCard icon={<ChartIcon width={24} height={24} color="#059669" />} value="312" label="Miles Tracked" />
-                    <StatCard icon={<ReportIcon width={24} height={24} color="#059669" />} value="12" label="Reports" />
+                    <StatCard icon={<PaperPlaneIcon width={24} height={24} color="#059669" />} value={safeTripsCount} label="Safe Trips" />
+                    <StatCard icon={<ChartIcon width={24} height={24} color="#059669" />} value={milesTracked} label="Miles Tracked" />
+                    <StatCard icon={<ReportIcon width={24} height={24} color="#059669" />} value={reports.length} label="Reports" />
                 </View>
             </View>
 
@@ -139,8 +165,52 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, onLogout, onUpdateUser 
             </View>
             
             <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Tracked Reports</Text>
+                {reports.length === 0 ? (
+                    <Text style={styles.comingSoon}>No reports yet</Text>
+                ) : (
+                    <View style={styles.trackedGrid}>
+                        {reports.slice(0, 8).map(r => (
+                            <TouchableOpacity
+                                key={r.id}
+                                style={styles.trackedCard}
+                                onPress={async () => {
+                                    await storage.setItem('reports.defaultTab', 'recent');
+                                    await storage.setItem('reports.highlightId', r.id);
+                                    onNavigate(ViewType.REPORTS);
+                                }}
+                            >
+                                {r.imageUri ? (
+                                    <View style={styles.trackedImageWrap}>
+                                        <View style={styles.trackedImage} />
+                                    </View>
+                                ) : (
+                                    <View style={styles.trackedImageWrap}>
+                                        <View style={styles.trackedImage} />
+                                    </View>
+                                )}
+                                <Text style={styles.trackedTitle} numberOfLines={1}>{r.wildlifeType}</Text>
+                                <Text style={styles.trackedSub} numberOfLines={1}>{new Date(r.timestamp).toLocaleDateString()}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+            </View>
+            
+            <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Achievements</Text>
-                <Text style={styles.comingSoon}>Achievements feature coming soon!</Text>
+                {reports.length >= 1 && (
+                    <Text style={styles.comingSoon}>🏅 First Report submitted</Text>
+                )}
+                {reports.length >= 5 && (
+                    <Text style={styles.comingSoon}>🥈 Explorer: 5+ reports</Text>
+                )}
+                {reports.length >= 10 && (
+                    <Text style={styles.comingSoon}>🥇 Ranger: 10+ reports</Text>
+                )}
+                {reports.length === 0 && (
+                    <Text style={styles.comingSoon}>No achievements yet</Text>
+                )}
             </View>
             
             <View style={styles.logoutSection}>
@@ -283,6 +353,49 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         gap: 12,
+    },
+    trackedGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+    },
+    trackedCard: {
+        width: '48%',
+        aspectRatio: 1,
+        backgroundColor: '#ffffff',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        padding: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    trackedImageWrap: {
+        width: '100%',
+        height: '60%',
+        borderRadius: 6,
+        overflow: 'hidden',
+        backgroundColor: '#f3f4f6',
+        marginBottom: 6,
+    },
+    trackedImage: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#e5e7eb',
+    },
+    trackedTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111827',
+        textAlign: 'center',
+        width: '100%',
+    },
+    trackedSub: {
+        fontSize: 12,
+        color: '#6b7280',
+        textAlign: 'center',
+        width: '100%',
     },
     statCard: {
         flex: 1,
