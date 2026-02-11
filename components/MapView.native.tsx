@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable, unstable_batchedUpdates } from 'react-native';
 import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, type Region } from 'react-native-maps';
 import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState, UIMode } from '../types';
@@ -9,12 +9,18 @@ import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon,
 import AnimalDetailModal from './AnimalDetailModal';
 import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
-import { fetchLatestSightings, type FirestoreSighting } from '../services/firestoreService';
 import { clusterAnimals, type AnimalCluster } from '../utils/clustering';
 import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
 import PredictionPanel from './PredictionPanel';
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
+
+const DUMMY_COORDINATES_2 = [
+    { latitude: 0, longitude: 0 },
+    { latitude: 0, longitude: 0 }
+];
+
+const PREDICTION_POINT_SLOTS = 3;
 
 
 // Route Planner Sheet Component
@@ -316,13 +322,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [isCenteringOnUser, setIsCenteringOnUser] = useState(false);
     
     // LSTM Prediction State - STABLE: never unmounted
-    const [predictedPath, setPredictedPath] = useState<{ lat: number, lon: number, address: string }[] | null>(null);
-    const safePredictedPath = useMemo(() => Array.isArray(predictedPath) ? predictedPath : [], [predictedPath]);
+    const [predictedPath, setPredictedPath] = useState<{ lat: number, lon: number, address: string }[]>([]);
+    const safePredictedPath = predictedPath;
     const [predictionLoading, setPredictionLoading] = useState(false);
     const [predictionRisk, setPredictionRisk] = useState<string | null>(null);
     const [predictedAnimalName, setPredictedAnimalName] = useState<string>('');
     const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-    const [firestoreSightings, setFirestoreSightings] = useState<FirestoreSighting[]>([]);
 
     const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
 
@@ -331,18 +336,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             setUiMode(UIMode.ROUTE_PLANNER);
         }
     }, [props.initialRouteStart, props.initialRouteEnd]);
-
-    // Fetch latest Firestore sightings on mount
-    useEffect(() => {
-        const loadFirestoreData = async () => {
-            const sightings = await fetchLatestSightings(5); // Fetch top 5 latest
-            setFirestoreSightings(sightings);
-        };
-        loadFirestoreData();
-        // Refresh every 5 minutes
-        const interval = setInterval(loadFirestoreData, 5 * 60 * 1000);
-        return () => clearInterval(interval);
-    }, []);
 
     useEffect(() => {
         if (safeRoute && routeStatus === AppState.SUCCESS && !isNavigating) {
@@ -446,197 +439,185 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }
         
         setPredictionLoading(true);
-        console.log(`[MapView] Fetching prediction for ${selectedAnimal.name} from Firestore`);
+        console.log('[MapView] Fetching prediction from backend API');
         
         // Capture animal data before clearing state
         const animalData = { ...selectedAnimal };
         
         try {
-            // 1. Try to find the latest prediction in Firestore for this specific animal
-            const animalSighting = firestoreSightings.find(s => s.animal === animalData.name);
-            
-            if (animalSighting && Array.isArray(animalSighting.predicted_path) && animalSighting.predicted_path.length > 0) {
-                console.log(`[MapView] Found Firestore prediction for ${animalData.name}`);
-                
-                setPredictedPath(animalSighting.predicted_path);
-                setPredictionRisk(animalSighting.risk);
-                setPredictedAnimalName(animalData.name);
-                setSelectedPointIndex(null);
-                setSelectedAnimal(null);
-                setUiMode(UIMode.PREDICTION);
-                
-                if (mapRef.current && animalSighting.predicted_path.length > 0) {
-                    const coords = animalSighting.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
-                    coords.push({ latitude: animalData.lat, longitude: animalData.lon });
-                    mapRef.current.fitToCoordinates(coords, {
-                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                        animated: true
-                    });
-                }
-                
-            } else {
-                // 2. Fallback to API if not in Firestore (maybe it's a new sighting)
-                console.log(`[MapView] No Firestore prediction found, falling back to API for ${animalData.name}`);
-                
-                const animalLat = animalData.lat ?? 0;
-                const animalLon = animalData.lon ?? 0;
-                
-                // Build recent path:
-                // 1) Prefer fullPath if available and has enough history
-                // 2) Else construct from recent sightings of the same species (last 5 by date)
-                // 3) Else fall back to current point
-                let recentPath: [number, number][] = [];
-                if (animalData.fullPath && animalData.fullPath.length >= 5) {
-                    recentPath = animalData.fullPath.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lon]);
-                } else {
-                    const sciName = animalData.scientificName;
-                    if (sciName) {
-                        const sameSpecies = recentSightings
-                            .filter(s => s.scientificName === sciName)
-                            .sort((a, b) => {
-                                const ta = new Date(a.date).getTime();
-                                const tb = new Date(b.date).getTime();
-                                return ta - tb;
-                            })
-                            .slice(-5)
-                            .map(s => [s.lat, s.lon] as [number, number]);
-                        if (sameSpecies.length >= 2) {
-                            recentPath = sameSpecies;
-                        }
-                    }
-                    if (recentPath.length === 0) {
-                        recentPath = [[animalLat, animalLon]];
-                    }
-                    if (recentPath.length === 1) {
-                        const [lat, lon] = recentPath[0];
-                        recentPath = [
-                            [lat, lon],
-                            [lat + 0.0001, lon + 0.0001]
-                        ];
-                    }
-                }
+            const animalLat = animalData.lat ?? 0;
+            const animalLon = animalData.lon ?? 0;
 
-                const result = await api.predictMovement(
-                    animalData.name,
-                    userLocation,
-                    recentPath,
-                    3 // k_future
-                );
-                
-                if (result && Array.isArray(result.predicted_path) && result.predicted_path.length > 0) {
-                    const baseLat = Number(animalData.lat ?? 0);
-                    const baseLon = Number(animalData.lon ?? 0);
-                    const baseAddr = String(animalData.address || 'current area');
-                    const toRad = (d: number) => (d * Math.PI) / 180;
-                    const toDeg = (r: number) => (r * 180) / Math.PI;
-                    const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                        const R = 6371;
-                        const dLat = toRad(lat2 - lat1);
-                        const dLon = toRad(lon2 - lon1);
-                        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                        return R * c;
-                    };
-                    const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                        const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-                        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-                        const brng = toDeg(Math.atan2(y, x));
-                        return (brng + 360) % 360;
-                    };
-                    const dirOf = (deg: number) => {
-                        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-                        const idx = Math.round(deg / 45) % 8;
-                        return dirs[idx];
-                    };
-                    const enriched = result.predicted_path.map(p => {
-                        const lat = Number(p.lat), lon = Number(p.lon);
-                        let address = p.address;
-                        if (!address || address.startsWith('Unknown')) {
-                            const d = haversineKm(baseLat, baseLon, lat, lon);
-                            const b = bearingDeg(baseLat, baseLon, lat, lon);
-                            address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
-                        }
-                        return { lat, lon, address };
-                    });
+            // Build recent path:
+            // 1) Prefer fullPath if available and has enough history
+            // 2) Else construct from recent sightings of the same species (last 5 by date)
+            // 3) Else fall back to current point
+            let recentPath: [number, number][] = [];
+            if (animalData.fullPath && animalData.fullPath.length >= 5) {
+                recentPath = animalData.fullPath.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lon]);
+            } else {
+                const sciName = animalData.scientificName;
+                if (sciName) {
+                    const sameSpecies = recentSightings
+                        .filter(s => s.scientificName === sciName)
+                        .sort((a, b) => {
+                            const ta = new Date(a.date).getTime();
+                            const tb = new Date(b.date).getTime();
+                            return ta - tb;
+                        })
+                        .slice(-5)
+                        .map(s => [s.lat, s.lon] as [number, number]);
+                    if (sameSpecies.length >= 2) {
+                        recentPath = sameSpecies;
+                    }
+                }
+                if (recentPath.length === 0) {
+                    recentPath = [[animalLat, animalLon]];
+                }
+                if (recentPath.length === 1) {
+                    const [lat, lon] = recentPath[0];
+                    recentPath = [
+                        [lat, lon],
+                        [lat + 0.0001, lon + 0.0001]
+                    ];
+                }
+            }
+
+            const result = await api.predictMovement(
+                animalData.name,
+                userLocation,
+                recentPath,
+                3 // k_future
+            );
+
+            if (result && Array.isArray(result.predicted_path) && result.predicted_path.length > 0) {
+                const baseLat = Number(animalData.lat ?? 0);
+                const baseLon = Number(animalData.lon ?? 0);
+                const baseAddr = String(animalData.address || 'current area');
+                const toRad = (d: number) => (d * Math.PI) / 180;
+                const toDeg = (r: number) => (r * 180) / Math.PI;
+                const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                    const R = 6371;
+                    const dLat = toRad(lat2 - lat1);
+                    const dLon = toRad(lon2 - lon1);
+                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                    return R * c;
+                };
+                const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+                    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+                    const brng = toDeg(Math.atan2(y, x));
+                    return (brng + 360) % 360;
+                };
+                const dirOf = (deg: number) => {
+                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                    const idx = Math.round(deg / 45) % 8;
+                    return dirs[idx];
+                };
+                const enriched = result.predicted_path.map(p => {
+                    const lat = Number(p.lat), lon = Number(p.lon);
+                    let address = p.address;
+                    if (!address || address.startsWith('Unknown')) {
+                        const d = haversineKm(baseLat, baseLon, lat, lon);
+                        const b = bearingDeg(baseLat, baseLon, lat, lon);
+                        address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
+                    }
+                    return { lat, lon, address };
+                });
+                unstable_batchedUpdates(() => {
                     setPredictedPath(enriched);
                     setPredictionRisk(result.risk_level);
                     setPredictedAnimalName(animalData.name);
                     setSelectedPointIndex(null);
                     setSelectedAnimal(null);
                     setUiMode(UIMode.PREDICTION);
-                    
-                    if (result.status === 'degraded') {
-                        console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
-                    }
-                    
-                    if (mapRef.current && result.predicted_path.length > 0) {
-                        const coords = result.predicted_path.map(p => ({ latitude: p.lat, longitude: p.lon }));
-                        coords.push({ latitude: animalData.lat, longitude: animalData.lon });
-                        mapRef.current.fitToCoordinates(coords, {
-                            edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                            animated: true
-                        });
-                    }
-                    
-                } else {
-                    const k = 3;
-                    const path = Array.isArray(recentPath) ? recentPath : [];
-                    const n = path.length;
-                    let lastLat = 0, lastLon = 0, dLat = 0.0005, dLon = 0.0005;
-                    if (n >= 1) { lastLat = Number(path[n - 1][0]); lastLon = Number(path[n - 1][1]); }
-                    if (n >= 2) {
-                        const prevLat = Number(path[n - 2][0]);
-                        const prevLon = Number(path[n - 2][1]);
-                        dLat = lastLat - prevLat;
-                        dLon = lastLon - prevLon;
-                        dLat = Math.max(Math.min(dLat, 0.01), -0.01);
-                        dLon = Math.max(Math.min(dLon, 0.01), -0.01);
-                    }
-                    const synth = [];
-                    for (let i = 1; i <= k; i++) synth.push([lastLat + dLat * i, lastLon + dLon * i]);
-                    const baseLat = Number(animalData.lat ?? 0);
-                    const baseLon = Number(animalData.lon ?? 0);
-                    const baseAddr = String(animalData.address || 'current area');
-                    const toRad = (d: number) => (d * Math.PI) / 180;
-                    const toDeg = (r: number) => (r * 180) / Math.PI;
-                    const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                        const R = 6371;
-                        const dLat = toRad(lat2 - lat1);
-                        const dLon = toRad(lon2 - lon1);
-                        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                        return R * c;
-                    };
-                    const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                        const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-                        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-                        const brng = toDeg(Math.atan2(y, x));
-                        return (brng + 360) % 360;
-                    };
-                    const dirOf = (deg: number) => {
-                        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-                        const idx = Math.round(deg / 45) % 8;
-                        return dirs[idx];
-                    };
-                    const enhanced = synth.map(([lat, lon]) => {
-                        const d = haversineKm(baseLat, baseLon, lat, lon);
-                        const b = bearingDeg(baseLat, baseLon, lat, lon);
-                        const address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
-                        return { lat, lon, address };
+                });
+
+                if (result.status === 'degraded') {
+                    console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
+                }
+
+                if (mapRef.current && enriched.length > 0) {
+                    const coords = enriched
+                        .map(p => ({ latitude: Number(p.lat), longitude: Number(p.lon) }))
+                        .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+                    const endLat = Number(animalData.lat);
+                    const endLon = Number(animalData.lon);
+                    if (Number.isFinite(endLat) && Number.isFinite(endLon)) coords.push({ latitude: endLat, longitude: endLon });
+                    if (coords.length > 0) {
+                    mapRef.current.fitToCoordinates(coords, {
+                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                        animated: true
                     });
+                    }
+                }
+            } else {
+                const k = 3;
+                const path = Array.isArray(recentPath) ? recentPath : [];
+                const n = path.length;
+                let lastLat = 0, lastLon = 0, dLat = 0.0005, dLon = 0.0005;
+                if (n >= 1) { lastLat = Number(path[n - 1][0]); lastLon = Number(path[n - 1][1]); }
+                if (n >= 2) {
+                    const prevLat = Number(path[n - 2][0]);
+                    const prevLon = Number(path[n - 2][1]);
+                    dLat = lastLat - prevLat;
+                    dLon = lastLon - prevLon;
+                    dLat = Math.max(Math.min(dLat, 0.01), -0.01);
+                    dLon = Math.max(Math.min(dLon, 0.01), -0.01);
+                }
+                const synth = [];
+                for (let i = 1; i <= k; i++) synth.push([lastLat + dLat * i, lastLon + dLon * i]);
+                const baseLat = Number(animalData.lat ?? 0);
+                const baseLon = Number(animalData.lon ?? 0);
+                const baseAddr = String(animalData.address || 'current area');
+                const toRad = (d: number) => (d * Math.PI) / 180;
+                const toDeg = (r: number) => (r * 180) / Math.PI;
+                const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                    const R = 6371;
+                    const dLat = toRad(lat2 - lat1);
+                    const dLon = toRad(lon2 - lon1);
+                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                    return R * c;
+                };
+                const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+                    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+                    const brng = toDeg(Math.atan2(y, x));
+                    return (brng + 360) % 360;
+                };
+                const dirOf = (deg: number) => {
+                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                    const idx = Math.round(deg / 45) % 8;
+                    return dirs[idx];
+                };
+                const enhanced = synth.map(([lat, lon]) => {
+                    const d = haversineKm(baseLat, baseLon, lat, lon);
+                    const b = bearingDeg(baseLat, baseLon, lat, lon);
+                    const address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
+                    return { lat, lon, address };
+                });
+                unstable_batchedUpdates(() => {
                     setPredictedPath(enhanced);
                     setPredictionRisk('Medium');
                     setPredictedAnimalName(animalData.name);
                     setSelectedPointIndex(null);
                     setSelectedAnimal(null);
                     setUiMode(UIMode.PREDICTION);
-                    if (mapRef.current && enhanced.length > 0) {
-                        const coords = enhanced.map(p => ({ latitude: p.lat, longitude: p.lon }));
-                        coords.push({ latitude: animalData.lat, longitude: animalData.lon });
-                        mapRef.current.fitToCoordinates(coords, {
-                            edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                            animated: true
-                        });
+                });
+                if (mapRef.current && enhanced.length > 0) {
+                    const coords = enhanced
+                        .map(p => ({ latitude: Number(p.lat), longitude: Number(p.lon) }))
+                        .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+                    const endLat = Number(animalData.lat);
+                    const endLon = Number(animalData.lon);
+                    if (Number.isFinite(endLat) && Number.isFinite(endLon)) coords.push({ latitude: endLat, longitude: endLon });
+                    if (coords.length > 0) {
+                    mapRef.current.fitToCoordinates(coords, {
+                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
+                        animated: true
+                    });
                     }
                 }
             }
@@ -714,6 +695,57 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         return { completedPath: [], remainingPath: safeRoute?.path || [] };
     }, [isNavigating, safeRoute, liveLocation, closestPathIndex]);
 
+    const predictedPointsSanitized = useMemo(() => {
+        return safePredictedPath
+            .map((pt) => ({
+                lat: Number(pt?.lat),
+                lon: Number(pt?.lon),
+                address: String(pt?.address || '')
+            }))
+            .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    }, [safePredictedPath]);
+
+    const predictedPolylineCoords = useMemo(() => {
+        const coords = predictedPointsSanitized.map((p) => ({ latitude: p.lat, longitude: p.lon }));
+        return coords.length >= 2 ? coords : DUMMY_COORDINATES_2;
+    }, [predictedPointsSanitized]);
+
+    const predictedPolylineStrokeWidth = predictedPointsSanitized.length >= 2 ? 4 : 0;
+
+    const predictedMarkerSlots = useMemo(() => {
+        const slots: { lat: number; lon: number; address: string; visible: boolean; index: number }[] = [];
+        for (let i = 0; i < PREDICTION_POINT_SLOTS; i++) {
+            const p = predictedPointsSanitized[i];
+            if (p) {
+                slots.push({ lat: p.lat, lon: p.lon, address: p.address, visible: true, index: i });
+            } else {
+                slots.push({ lat: 0, lon: 0, address: '', visible: false, index: i });
+            }
+        }
+        return slots;
+    }, [predictedPointsSanitized]);
+
+    const remainingPolylineCoords = useMemo(() => {
+        if (!Array.isArray(remainingPath)) return [];
+        return remainingPath
+            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
+            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+    }, [remainingPath]);
+
+    const completedPolylineCoords = useMemo(() => {
+        if (!Array.isArray(completedPath)) return [];
+        return completedPath
+            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
+            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+    }, [completedPath]);
+
+    const safeRoutePolylineCoords = useMemo(() => {
+        if (!safeRoute || !Array.isArray(safeRoute.path)) return [];
+        return safeRoute.path
+            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
+            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+    }, [safeRoute]);
+
     // Map camera control
     useEffect(() => {
         if (!mapRef.current) return;
@@ -737,8 +769,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 }, 1000);
             }
         } else if (safeRoute && safeRoute.path.length > 0) {
-            const coordinates = safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }));
-            mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
+            const routeCoords = safeRoute.path
+                .map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))
+                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+            const safeCoords = (Array.isArray(safePlaces) ? safePlaces : [])
+                .map((p: any) => ({ latitude: Number(p?.lat), longitude: Number(p?.lon) }))
+                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+            const coordinates = [...routeCoords, ...safeCoords];
+            if (coordinates.length > 0) {
+                mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 60, right: 60, bottom: 260, left: 60 }, animated: true });
+            }
         } else if (userLocation) {
             mapRef.current.animateToRegion({
                 latitude: userLocation.lat,
@@ -750,27 +790,37 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             const coordinates = recentSightings.map(s => ({ latitude: s.lat, longitude: s.lon }));
             mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
         }
-    }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart, recentSightings]);
+    }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart, recentSightings, safePlaces]);
 
     const processedSafePlaces = useMemo(() => {
-        if (!safeRoute) return safePlaces.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
+        const sanitized = (Array.isArray(safePlaces) ? safePlaces : [])
+            .map((p) => ({
+                ...p,
+                lat: Number((p as any).lat),
+                lon: Number((p as any).lon),
+            }))
+            .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
 
-        const placesWithDist = safePlaces.map(place => {
-            const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, safeRoute.path);
+        if (!safeRoute) return sanitized.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
+
+        const placesWithDist = sanitized.map(place => {
+            const distKm = calculateMinDistanceToPolyline({ lat: place.lat, lon: place.lon }, safeRoute.path);
             return { ...place, distKm };
         });
 
-        const filtered = placesWithDist.filter(p => p.distKm <= 1);
+        const maxDistKm = 5;
+        const nearby = placesWithDist.filter(p => typeof p.distKm === 'number' && p.distKm <= maxDistKm);
+        const selected = nearby.length > 0 ? nearby : placesWithDist.slice(0, 10);
 
-        return filtered.map(p => {
-             const distMeters = p.distKm * 1000;
-             const durationMin = (p.distKm / 5) * 60; 
-             
-             return {
-                 ...p,
-                 distanceStr: formatDistance(distMeters),
-                 durationStr: formatDuration(durationMin)
-             };
+        return selected.map(p => {
+            const distKm = typeof p.distKm === 'number' ? p.distKm : undefined;
+            const distMeters = typeof distKm === 'number' ? distKm * 1000 : 0;
+            const durationMin = typeof distKm === 'number' ? (distKm / 5) * 60 : 0;
+            return {
+                ...p,
+                distanceStr: typeof distKm === 'number' ? formatDistance(distMeters) : undefined,
+                durationStr: typeof distKm === 'number' ? formatDuration(durationMin) : undefined
+            };
         });
     }, [safePlaces, safeRoute]);
 
@@ -824,7 +874,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
                     }
                 >
-                    {reports.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number').map(r => (
+                    <>
+                    {Array.isArray(reports) ? reports.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number').map(r => (
                         <Marker
                             key={`report-${r.id}`}
                             coordinate={{ latitude: r.lat as number, longitude: r.lon as number }}
@@ -869,16 +920,19 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 </View>
                             </Callout>
                         </Marker>
-                    ))}
-                    {isNavigating && liveLocation && (
-                        <Marker
-                            coordinate={{ latitude: liveLocation.lat, longitude: liveLocation.lon }}
-                            title="Your Location"
-                            description={liveLocation.name}
-                        />
-                    )}
+                    )) : null}
+                    <Marker
+                        key="live-location"
+                        coordinate={{
+                            latitude: Number(isNavigating && liveLocation ? liveLocation.lat : 0),
+                            longitude: Number(isNavigating && liveLocation ? liveLocation.lon : 0)
+                        }}
+                        title={isNavigating && liveLocation ? "Your Location" : ""}
+                        description={isNavigating && liveLocation ? liveLocation.name : ""}
+                        opacity={isNavigating && liveLocation ? 1 : 0}
+                    />
 
-                    {isNavigating && liveLocation && showNearbyRadius && (
+                    {isNavigating && liveLocation && showNearbyRadius ? (
                         <Circle
                             center={{ latitude: liveLocation.lat, longitude: liveLocation.lon }}
                             radius={nearbyRadiusKm * 1000}
@@ -886,73 +940,83 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             fillColor="rgba(249, 115, 22, 0.1)"
                             strokeWidth={1}
                         />
-                    )}
+                    ) : null}
 
-                    {/* LSTM Predicted Path */}
-                    {safePredictedPath.length > 0 && (
-                        <Polyline
-                            coordinates={safePredictedPath.map(pt => ({ latitude: pt.lat, longitude: pt.lon }))}
-                            strokeColor={
-                                predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
-                                predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
-                            }
-                            strokeWidth={4}
-                            lineDashPattern={[5, 5]}
-                            zIndex={10}
-                        />
-                    )}
+                    {/* NOTE: With Fabric (new architecture) + react-native-maps, keep MapView child hierarchy stable to avoid addViewAt crashes on Android. */}
+                    {/* LSTM Predicted Path (always rendered; hidden when insufficient points) */}
+                    <Polyline
+                        key="predicted-path"
+                        coordinates={predictedPolylineCoords}
+                        strokeColor={
+                            predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
+                            predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
+                        }
+                        strokeWidth={predictedPolylineStrokeWidth}
+                        lineDashPattern={[5, 5]}
+                        zIndex={10}
+                    />
                     
-                    {safePredictedPath.length > 0 && safePredictedPath.map((p, i) => (
+                    {/* Predicted points (always rendered; hidden when not available) */}
+                    {predictedMarkerSlots.map((p) => (
                         <Marker
-                            key={`pred-marker-${i}`}
+                            key={`pred-point-${p.index}`}
                             coordinate={{ latitude: p.lat, longitude: p.lon }}
-                            onPress={() => handlePointSelect(p, i)}
+                            opacity={p.visible ? 1 : 0}
+                            onPress={() => {
+                                if (!p.visible) return;
+                                handlePointSelect({ lat: p.lat, lon: p.lon, address: p.address }, p.index);
+                            }}
                         >
-                            <Callout tooltip={true}>
-                                <View style={styles.customCallout}>
-                                    <Text style={styles.calloutTitle}>Next Location #{i + 1}</Text>
-                                    <Text style={styles.calloutDetail}>{p.address || 'Unknown forest area (coordinates available)'}</Text>
-                                    <Text style={[styles.calloutDetail, { marginTop: 4, fontStyle: 'italic' }]}>
-                                        Lat: {p.lat.toFixed(4)}, Lon: {p.lon.toFixed(4)}
-                                    </Text>
-                                </View>
-                            </Callout>
+                            {p.visible ? (
+                                <Callout tooltip={true}>
+                                    <View style={styles.customCallout}>
+                                        <Text style={styles.calloutTitle}>Next Location #{p.index + 1}</Text>
+                                        <Text style={styles.calloutDetail}>{p.address || 'Unknown forest area (coordinates available)'}</Text>
+                                        <Text style={[styles.calloutDetail, { marginTop: 4, fontStyle: 'italic' }]}>
+                                            Lat: {p.lat.toFixed(4)}, Lon: {p.lon.toFixed(4)}
+                                        </Text>
+                                    </View>
+                                </Callout>
+                            ) : (
+                                <View />
+                            )}
                             <View style={[
-                                styles.indexCircle, 
-                                { 
-                                    backgroundColor: 
-                                        predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
+                                styles.indexCircle,
+                                {
+                                    backgroundColor:
+                                        predictionRisk?.toLowerCase() === 'high' ? '#ef4444' :
                                         predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981',
-                                    transform: [{ scale: selectedPointIndex === i ? 1.2 : 0.8 }]
+                                    transform: [{ scale: selectedPointIndex === p.index ? 1.2 : 0.8 }],
+                                    opacity: p.visible ? 1 : 0
                                 }
                             ]}>
-                                <Text style={styles.indexText}>{i + 1}</Text>
+                                <Text style={styles.indexText}>{p.index + 1}</Text>
                             </View>
                         </Marker>
                     ))}
 
-                    {safeRoute && (
-                        <>
-                            {isNavigating ? (
-                                <Polyline
-                                    coordinates={remainingPath.map(([lat, lon]: any) => ({ latitude: lat, longitude: lon }))}
-                                    strokeColor="#10b981"
-                                    strokeWidth={6}
-                                    zIndex={1}
-                                />
-                            ) : (
-                                <Polyline
-                                    coordinates={safeRoute.path.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                    strokeColor="#10b981"
-                                    strokeWidth={6}
-                                    zIndex={1}
-                                />
-                            )}
+                    <>
+                            <Polyline
+                                key="route-full"
+                                coordinates={Array.isArray(safeRoutePolylineCoords) && safeRoutePolylineCoords.length >= 2 ? safeRoutePolylineCoords : DUMMY_COORDINATES_2}
+                                strokeColor="#10b981"
+                                strokeWidth={!isNavigating && Array.isArray(safeRoutePolylineCoords) && safeRoutePolylineCoords.length >= 2 ? 6 : 0}
+                                zIndex={1}
+                            />
+                            <Polyline
+                                key="route-remaining"
+                                coordinates={Array.isArray(remainingPolylineCoords) && remainingPolylineCoords.length >= 2 ? remainingPolylineCoords : DUMMY_COORDINATES_2}
+                                strokeColor="#10b981"
+                                strokeWidth={isNavigating && Array.isArray(remainingPolylineCoords) && remainingPolylineCoords.length >= 2 ? 6 : 0}
+                                zIndex={1}
+                            />
 
                             {/* Risky Segments (Red) */}
-                            {riskySegments && riskySegments.map((segment: [number, number][], index: number) => (
+                            {Array.isArray(riskySegments) && riskySegments
+                                .filter((segment: any) => Array.isArray(segment) && segment.length >= 2)
+                                .map((segment: [number, number][], index: number) => (
                                 <Polyline
-                                    key={`risky-${index}`}
+                                    key={`risky-${segment[0]?.[0]}-${segment[0]?.[1]}-${segment[segment.length - 1]?.[0]}-${segment[segment.length - 1]?.[1]}-${index}`}
                                     coordinates={segment.map(([lat, lon]: [number, number]) => ({ latitude: lat, longitude: lon }))}
                                     strokeColor="#ef4444"
                                     strokeWidth={6}
@@ -960,29 +1024,33 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 />
                             ))}
 
-                            {isNavigating ? (
-                                <Polyline
-                                    coordinates={completedPath.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
-                                    strokeColor="#6b7280"
-                                    strokeWidth={5}
-                                    lineDashPattern={[5, 10]}
-                                    zIndex={3}
-                                />
-                            ) : null}
+                            <Polyline
+                                key="route-completed"
+                                coordinates={Array.isArray(completedPolylineCoords) && completedPolylineCoords.length >= 2 ? completedPolylineCoords : DUMMY_COORDINATES_2}
+                                strokeColor="#6b7280"
+                                strokeWidth={isNavigating && Array.isArray(completedPolylineCoords) && completedPolylineCoords.length >= 2 ? 5 : 0}
+                                lineDashPattern={[5, 10]}
+                                zIndex={3}
+                            />
 
                             <Marker
-                                coordinate={{ latitude: safeRoute.end.lat, longitude: safeRoute.end.lon }}
-                                title="Destination"
-                                description={safeRoute.end.name}
+                                key="destination"
+                                coordinate={{
+                                    latitude: Number(safeRoute ? safeRoute.end.lat : 0),
+                                    longitude: Number(safeRoute ? safeRoute.end.lon : 0)
+                                }}
+                                title={safeRoute ? "Destination" : ""}
+                                description={safeRoute ? safeRoute.end.name : ""}
+                                opacity={safeRoute ? 1 : 0}
                             />
                         </>
-                    )}
 
                     {/* Risk Zones Circles */}
-                    {showAnimalMarkers && riskZones && riskZones.map((zone, index) => {
+                    {showAnimalMarkers && Array.isArray(riskZones) && riskZones
+                        .filter((zone) => Number.isFinite(parseFloat(String(zone?.lat))) && Number.isFinite(parseFloat(String(zone?.lon))))
+                        .map((zone, index) => {
                          const lat = parseFloat(String(zone.lat));
                          const lon = parseFloat(String(zone.lon));
-                         if (isNaN(lat) || isNaN(lon)) return null;
                          return (
                             <Circle
                                 key={`risk-circle-${zone.id || zone.scientific_name}-${index}`}
@@ -996,10 +1064,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     })}
 
                     {/* Risk Zones Markers */}
-                    {showAnimalMarkers && riskZones && riskZones.map((zone, index) => {
+                    {showAnimalMarkers && Array.isArray(riskZones) && riskZones
+                        .filter((zone) => Number.isFinite(parseFloat(String(zone?.lat))) && Number.isFinite(parseFloat(String(zone?.lon))))
+                        .map((zone, index) => {
                          const lat = parseFloat(String(zone.lat));
                          const lon = parseFloat(String(zone.lon));
-                         if (isNaN(lat) || isNaN(lon)) return null;
                          const animalInfo = ANIMALS[zone.scientific_name];
                          const commonName = animalInfo?.common ?? zone.name ?? zone.scientific_name;
                          const emoji = animalInfo?.emoji ?? zone.emoji ?? '⚠️';
@@ -1028,10 +1097,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     })}
 
                     {/* Safe Places */}
-                    {processedSafePlaces.map(place => (
+                    {(Array.isArray(processedSafePlaces) ? processedSafePlaces : [])
+                        .filter((p: any) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lon)))
+                        .map((place: any, index: number) => (
                         <Marker
-                            key={place.id}
-                            coordinate={{ latitude: place.lat, longitude: place.lon }}
+                            key={`safeplace-${place.id || `${Number(place.lat).toFixed(6)}-${Number(place.lon).toFixed(6)}-${place.name || ''}-${index}`}`}
+                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
+                            zIndex={30}
                         >
                             <Text style={{ fontSize: 28 }}>
                                 {place.type === 'police' ? '👮' : '🌲'}
@@ -1050,14 +1122,19 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     ))}
 
                     {/* Recent wildlife: near-route only when we have a route; otherwise all recent */}
-                    {showAnimalMarkers && !safeRoute && recentSightings.map((sighting) => {
+                    {showAnimalMarkers && !safeRoute && recentSightings
+                        .filter(s => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lon)))
+                        .map((sighting) => {
                          const animalInfo = ANIMALS[sighting.scientificName];
                          const commonName = animalInfo?.common ?? sighting.name;
                          const emoji = animalInfo?.emoji ?? sighting.emoji ?? '🐾';
+                         const latKey = Number(sighting.lat).toFixed(6);
+                         const lonKey = Number(sighting.lon).toFixed(6);
+                         const dateKey = String(sighting.date || sighting.eventDate || '');
                          return (
                             <Marker
-                                key={`marker-${sighting.id || sighting.scientificName}`}
-                                coordinate={{ latitude: sighting.lat, longitude: sighting.lon }}
+                                key={`sighting-${sighting.id || `${sighting.scientificName}-${latKey}-${lonKey}-${dateKey}`}`}
+                                coordinate={{ latitude: Number(sighting.lat), longitude: Number(sighting.lon) }}
                                 onPress={() => {
                                     setSelectedAnimal({
                                         name: commonName,
@@ -1084,10 +1161,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         const pathIndex = pathIndexRef.current;
                         if (cluster.members.length === 1) {
                             const p = cluster.members[0];
+                            if (!Array.isArray(p.fullPath) || p.fullPath.length < 2) return null;
+                            const coords = p.fullPath
+                                .slice(0, Math.min(pathIndex + 1, p.fullPath.length))
+                                .map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))
+                                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+                            if (coords.length < 2) return null;
                             return (
                                 <Polyline
                                     key={`cluster-path-${p.id}`}
-                                    coordinates={p.fullPath.slice(0, pathIndex + 1).map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
+                                    coordinates={coords}
                                     strokeColor={p.color}
                                     strokeWidth={4}
                                 />
@@ -1115,10 +1198,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             );
                         } else if (cluster.members.length === 1) {
                             const p = cluster.members[0];
+                            const point = Array.isArray(p.fullPath) ? p.fullPath[pathIndex] : null;
+                            if (!Array.isArray(point) || point.length < 2) return null;
                             return (
                                 <Marker
                                     key={`cluster-marker-single-${p.id}`}
-                                    coordinate={{ latitude: p.fullPath[pathIndex][0], longitude: p.fullPath[pathIndex][1] }}
+                                    coordinate={{ latitude: point[0], longitude: point[1] }}
                                     title={p.common}
                                     description={p.current.addr}
                                     onPress={() => handleViewDetails(p)}
@@ -1132,6 +1217,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         return null;
                     })}
 
+                    </>
                 </MapView>
 
                 <TouchableOpacity
@@ -1376,7 +1462,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 onClose={() => {
                                     console.log('[MapView] Closing prediction panel');
                                     setUiMode(UIMode.MAP);
-                                    setPredictedPath(null);
+                                    setPredictedPath([]);
                                 }}
                                 onPointSelect={handlePointSelect}
                                 selectedPointIndex={selectedPointIndex}

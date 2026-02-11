@@ -36,7 +36,12 @@ const app = express();
 console.log("Server file loaded");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_inat_recent.py');
-const WILDLIFE_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'inat_live.json');
+const WILDLIFE_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'inat_historical.json');
+// GBIF is secondary/optional now, but we keep it if needed, or remove if user wants strictly iNat.
+// User said: "Wildlife observation data must be handled via: Direct API fetch from iNaturalist"
+// I will comment out GBIF fetch for now to strictly follow "fetch from iNaturalist" directive, 
+// or I will leave it but ensure iNat is the main source.
+// Let's keep GBIF definitions but focus on iNat.
 const GBIF_PYTHON_SCRIPT = path.join(__dirname, 'python', 'fetch_gbif_recent.py');
 const GBIF_CACHE_PATH = path.join(__dirname, 'python', 'cache', 'gbif_recent.json');
 const ML_DIR = path.resolve(__dirname, '..', 'ml');
@@ -365,6 +370,7 @@ app.post('/api/ml/seed-dataset', async (req, res) => {
 // --- Wildlife data helpers ---
 const readJsonArray = (filePath) => {
     try {
+        if (!fs.existsSync(filePath)) return [];
         const raw = fs.readFileSync(filePath, 'utf8');
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
@@ -373,14 +379,31 @@ const readJsonArray = (filePath) => {
         return [];
     }
 };
-const getInatData = () => readJsonArray(WILDLIFE_CACHE_PATH);
-const getGbifData = () => readJsonArray(GBIF_CACHE_PATH);
+
+const getHistoricalData = () => readJsonArray(WILDLIFE_CACHE_PATH);
+
+// ML needs full historical context (2020 -> today).
+// The UI/routing shows only a recent window (default: last 30 days) to reduce clutter and focus on near-term risk.
+const getRecentData = (days = 30) => {
+    const allData = getHistoricalData();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    
+    return allData.filter(item => {
+        if (!item.eventDate || item.eventDate === "Unknown") return false;
+        const d = new Date(item.eventDate);
+        return d >= cutoff;
+    });
+};
 
 const runInatPython = () => {
+    // Only run if cache is missing or explicitly requested (cache freshness handled in Python script)
+    // The Python script now checks for existence.
+    console.log("Running iNaturalist fetcher...");
     const r = spawnSync(INAT_PYTHON_EXE, [PYTHON_SCRIPT], {
         cwd: path.dirname(PYTHON_SCRIPT),
         encoding: 'utf8',
-        timeout: 60000,
+        timeout: 120000, // Increased timeout for historical fetch
     });
     if (r.error) {
         console.error("iNaturalist Python spawn error:", r.error.message);
@@ -393,91 +416,43 @@ const runInatPython = () => {
     return true;
 };
 
-const runGbifPython = () => {
-    const r = spawnSync(INAT_PYTHON_EXE, [GBIF_PYTHON_SCRIPT], {
-        cwd: path.dirname(GBIF_PYTHON_SCRIPT),
-        encoding: 'utf8',
-        timeout: 60000,
-    });
-    if (r.error) {
-        console.error("GBIF Python spawn error:", r.error.message);
-        return false;
-    }
-    if (r.status !== 0) {
-        console.error("GBIF Python stderr:", r.stderr || r.error);
-        return false;
-    }
-    return true;
-};
+// Removed syncSightingsToFirestore as per constraint: "Do NOT upload or dump wildlife observation data to Firebase Storage"
+// (and presumably Firestore for this specific data, as per "User-submitted community reports (Firestore)" vs "Wildlife observation data... Direct API fetch")
 
-const syncSightingsToFirestore = async (sightings) => {
-    if (!db) {
-        console.warn("Skipping Firestore sync: DB not initialized");
-        return;
+// API: Get All Historical Data (for ML or analysis)
+app.get('/api/wildlife/all', (req, res) => {
+    // Check if we need to fetch first?
+    if (!fs.existsSync(WILDLIFE_CACHE_PATH)) {
+        runInatPython();
     }
-    console.log(`[Sync] Starting sync for ${sightings.length} records...`);
-    let count = 0;
-    for (const animal of sightings) {
-        // Fallback if ID is missing (legacy cache might not have it)
-        const docId = animal.id ? String(animal.id) : `${animal.scientific_name}_${animal.lat}_${animal.lon}`;
-        
-        try {
-            const docRef = doc(db, 'animal_sightings', docId);
-            
-            // Map eventDate to generated_at for sorting compatibility
-            const generatedAt = animal.eventDate ? new Date(animal.eventDate).toISOString() : new Date().toISOString();
-            
-            await setDoc(docRef, {
-                ...animal,
-                generated_at: generatedAt,
-                synced_at: new Date().toISOString()
-            }, { merge: true });
-            count++;
-        } catch (err) {
-            console.error(`[Sync] Failed to sync animal ${docId}:`, err.message);
-        }
-    }
-    console.log(`[Sync] Successfully synced ${count} documents.`);
-};
-
-// iNaturalist recent sightings
-app.get('/api/inat/recent', (req, res) => {
-    if (runInatPython()) {
-        const fresh = getInatData();
-        syncSightingsToFirestore(fresh).catch(err => console.error("Sync error:", err));
-        return res.json(fresh);
-    }
-    const cached = getInatData();
-    res.json(cached);
+    const data = getHistoricalData();
+    res.json(data);
 });
 
-// GBIF recent sightings
-app.get('/api/gbif/recent', (req, res) => {
-    if (runGbifPython()) {
-        const fresh = getGbifData();
-        // Optional: also sync GBIF records
-        syncSightingsToFirestore(fresh).catch(err => console.error("Sync error:", err));
-        return res.json(fresh);
-    }
-    const cached = getGbifData();
-    res.json(cached);
-});
-
-// Unified wildlife feed (merged iNat + GBIF)
+// API: Get Recent Data (for UI/Routing)
 app.get('/api/wildlife/recent', (req, res) => {
-    // Try to refresh both; fallback to cached if any fails
-    runInatPython();
-    runGbifPython();
-    const inat = getInatData();
-    const gbif = getGbifData();
-    // Simple merge; consider de-dup by lat/lon and time if needed
-    res.json([...inat, ...gbif]);
+    const days = req.query.days ? parseInt(req.query.days) : 30;
+    
+    // Trigger fetch if missing
+    if (!fs.existsSync(WILDLIFE_CACHE_PATH)) {
+        runInatPython();
+    }
+    
+    const recent = getRecentData(days);
+    res.json(recent);
 });
+
+// Legacy support (optional, can redirect to recent)
+app.get('/api/inat/recent', (req, res) => {
+    res.redirect('/api/wildlife/recent');
+});
+
 
 // --- New: sightings API for useAnimalData hook ---
 app.get('/api/sightings', (req, res) => {
     const { scientificName, lat, lon, radius } = req.query;
-    const wildlife = [...getInatData(), ...getGbifData()];
+    // Use only recent data for map display (default: 30 days)
+    const wildlife = getRecentData(30);
     
     const filtered = wildlife.filter(animal => {
         if (scientificName && animal.scientific_name !== scientificName) return false;
@@ -694,7 +669,8 @@ app.post('/api/animals/near-route', (req, res) => {
     // Convert [lon, lat] to [lat, lon] for our helper
     const routePath = pathPoints.map(p => [p[1], p[0]]);
 
-    const wildlife = [...getInatData(), ...getGbifData()];
+    // Use Recent Data ONLY for Routing (default: 30 days)
+    const wildlife = getRecentData(30);
     const riskZones = [];
 
     // Filter logic
@@ -1043,7 +1019,9 @@ app.post('/api/predict-risk', (req, res) => {
         animal,
         distance_km,
         eventDate: eventDate || new Date().toISOString(),
-        metadata: {
+        confidence: confidence || 'medium',
+        scope: scope || 'regional',
+        metadata: { // Keep for backward compatibility if needed, but prefer flat
             confidence: confidence || 'medium',
             scope: scope || 'regional'
         }
@@ -1086,7 +1064,12 @@ app.post('/api/predict-risk', (req, res) => {
 
         try {
             const prediction = JSON.parse(trimmedStdout);
-            res.json(prediction);
+            res.json({
+                ...prediction,
+                risk_label: prediction?.risk ?? prediction?.risk_level ?? '',
+                probability: Number.isFinite(prediction?.probability) ? Number(prediction.probability) : 0.0,
+                predicted_points: []
+            });
         } catch (parseErr) {
             console.error('[ML-Risk Error] JSON Parse Failed:', parseErr.message);
             res.status(500).json({ error: 'Failed to parse ML output', status: 'failed' });
@@ -1114,11 +1097,10 @@ app.post('/api/predict-movement', async (req, res) => {
     let enrichedRecentPath = Array.isArray(recent_path) ? recent_path : [];
     try {
         if (!Array.isArray(enrichedRecentPath) || enrichedRecentPath.length < 2) {
-            const inat = getInatData();
-            const gbif = getGbifData();
-            const merged = [...inat, ...gbif];
+            // Use historical data for path enrichment/ML context if needed
+            const merged = getHistoricalData();
             const matches = merged
-                .filter(r => (r.animal && r.animal.toLowerCase() === String(animal).toLowerCase()))
+                .filter(r => (r.animal && r.animal.toLowerCase() === String(animal).toLowerCase()) || (r.species && r.species.toLowerCase() === String(animal).toLowerCase()))
                 .filter(r => typeof r.lat === 'number' && typeof r.lon === 'number');
             matches.sort((a, b) => {
                 const ta = new Date(a.eventDate || 0).getTime();
@@ -1212,7 +1194,10 @@ app.post('/api/predict-movement', async (req, res) => {
                 animal,
                 risk: riskLevel,
                 risk_level: riskLevel,
+                risk_label: riskLevel,
                 predicted_path: enhancedPath,
+                predicted_points: enhancedPath,
+                probability: 0.0,
                 safety_override: safetyOverride,
                 distance_to_user_km: distKm,
                 model_used: 'ensemble',

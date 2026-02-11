@@ -25,7 +25,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_PATH = os.path.join(BASE_DIR, "risk_models.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "encoders.pkl")
 FEATURE_ORDER_PATH = os.path.join(BASE_DIR, "feature_order.json")
-DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_live.json"))
+DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 
 MIN_SAMPLES_PER_ANIMAL = 10  # Minimum samples to train a species-specific model
 
@@ -81,8 +81,18 @@ class WildlifeRiskModel:
         
         # 2. Time & Meta features
         df['hour_of_day'] = df['eventDate'].apply(lambda x: pd.to_datetime(x).hour if pd.notnull(x) else 12)
-        df['confidence'] = df['metadata'].apply(lambda x: x.get('confidence', 'unknown') if isinstance(x, dict) else 'unknown')
-        df['scope'] = df['metadata'].apply(lambda x: x.get('scope', 'unknown') if isinstance(x, dict) else 'unknown')
+        
+        # Handle flat or nested metadata (compatibility)
+        if 'metadata' in df.columns:
+            df['confidence'] = df.apply(lambda row: row['metadata'].get('confidence', 'unknown') if isinstance(row.get('metadata'), dict) else row.get('confidence', 'unknown'), axis=1)
+            df['scope'] = df.apply(lambda row: row['metadata'].get('scope', 'unknown') if isinstance(row.get('metadata'), dict) else row.get('scope', 'unknown'), axis=1)
+        else:
+             if 'confidence' not in df.columns: df['confidence'] = 'unknown'
+             if 'scope' not in df.columns: df['scope'] = 'unknown'
+        
+        df['confidence'] = df['confidence'].fillna('unknown')
+        df['scope'] = df['scope'].fillna('unknown')
+        
         df['risk_label'] = df['distance_km'].apply(self._label_risk_heuristic)
 
         # 3. Categorical Encoding

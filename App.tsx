@@ -17,7 +17,6 @@ import { AppProvider, useAppContext } from './contexts/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
 import { auth, db } from "./services/firebase";
-import { syncAnimalsFromConstants } from "./services/firestoreService";
 import { storage } from "./utils/storage";
 
 console.log("Firebase connected:", auth.app.name);
@@ -80,19 +79,6 @@ const AppContent: React.FC = () => {
     const handleNavigate = (view: View) => {
         setCurrentView(view);
     };
-
-    useEffect(() => {
-        const runSync = async () => {
-            try {
-                const flag = await storage.getItem<boolean>('animals.synced');
-                if (!flag && backendReady) {
-                    await syncAnimalsFromConstants();
-                    await storage.setItem('animals.synced', true);
-                }
-            } catch {}
-        };
-        runSync();
-    }, [backendReady]);
 
     // 1. Wait for Auth to initialize
     if (isLoading) {

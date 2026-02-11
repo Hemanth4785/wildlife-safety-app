@@ -31,7 +31,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 # ---------------- CONFIGURATION ---------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_live.json"))
+DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 LSTM_MODEL_DIR = os.path.join(BASE_DIR, "models", "lstm")
 SCALER_PATH = os.path.join(LSTM_MODEL_DIR, "gps_scaler.pkl")
 

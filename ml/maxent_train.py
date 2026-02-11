@@ -7,7 +7,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegression
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_live.json"))
+DATA_CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 MODEL_DIR = os.path.join(BASE_DIR, "models", "maxent")
 os.makedirs(MODEL_DIR, exist_ok=True)
 MODELS_PATH = os.path.join(MODEL_DIR, "maxent_models.pkl")

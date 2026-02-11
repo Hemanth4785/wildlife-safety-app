@@ -1,18 +1,8 @@
+
 """
 LSTM Inference script for Wildlife Movement Prediction.
 Combines LSTM (spatial prediction) with Random Forest (risk classification).
-
-ACADEMIC JUSTIFICATIONS:
-- Why LSTM: Chosen for its ability to capture long-term temporal dependencies in non-linear 
-  movement patterns. The gate mechanism prevents vanishing gradients, making it safer for 
-  multi-step trajectory forecasting.
-- Why Random Forest: Retained as the final classifier because it handles discrete feature 
-  interactions (distance, species, time of day) with high stability and interpretable results.
-- Why No Bi-LSTM: Avoided because bidirectional models require future context to predict 
-  past points, which is impossible in a real-time safety system. Bi-LSTM would introduce 
-  temporal leakage and non-causal inference.
-- Multi-algorithm Design: This hybrid approach separates 'where' (spatial LSTM) from 'risk' 
-  (classification RF), creating a 'defense-in-depth' safety architecture.
+Incorporates historical data for context-aware validation.
 """
 
 import sys
@@ -24,22 +14,18 @@ import pandas as pd
 from datetime import datetime
 import warnings
 
-# Suppress TensorFlow and other logs (must be set BEFORE importing ML libs)
+# Suppress TensorFlow and other logs
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 os.environ['PYTHONWARNINGS'] = 'ignore'
 os.environ['AUTOGRAPH_VERBOSITY'] = '0'
-
-# Suppress warnings
 warnings.filterwarnings("ignore")
 
-# Import Random Forest classifier
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
 try:
     from predict_risk import predict_risk
 except ImportError:
-    # Define a dummy predict_risk if it cannot be imported
     def predict_risk(record):
         return {"risk": "Medium"}
 
@@ -47,6 +33,7 @@ except ImportError:
 LSTM_MODEL_DIR = os.path.join(BASE_DIR, "models", "lstm")
 SCALER_PATH = os.path.join(LSTM_MODEL_DIR, "gps_scaler.pkl")
 WINDOW_SIZE = 5
+CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 
 def haversine(lat1, lon1, lat2, lon2):
     """Calculate distance in KM between two points."""
@@ -56,6 +43,28 @@ def haversine(lat1, lon1, lat2, lon2):
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
     return 6371 * c
+
+def load_historical_data(animal):
+    """Loads historical data for the specific animal from local cache."""
+    if not os.path.exists(CACHE_PATH):
+        return []
+    try:
+        with open(CACHE_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        points = []
+        target = animal.lower()
+        for item in data:
+            if (item.get('species', '').lower() == target or 
+                item.get('scientific_name', '').lower() == target or 
+                item.get('animal', '').lower() == target):
+                try:
+                    points.append([float(item['lat']), float(item['lon'])])
+                except:
+                    pass
+        return points
+    except Exception:
+        return []
 
 def load_lstm_model(animal):
     """Loads species-specific or generic fallback LSTM model (.keras)."""
@@ -84,9 +93,9 @@ def load_lstm_model(animal):
 
 def predict_future_risk(input_data):
     """
-    1. Predicts next K future locations via LSTM (recursive).
-    2. Classifies risk for the nearest future point via Random Forest.
-    3. Applies mandatory human-safety overrides.
+    1. Predicts next K future locations via LSTM.
+    2. Validates against historical corridors.
+    3. Classifies risk via Random Forest.
     """
     # 1. Validation
     animal = input_data.get('animal')
@@ -96,11 +105,16 @@ def predict_future_risk(input_data):
     
     if not animal or not recent_path or not user_location:
         return {
-            "error": "Missing required fields: animal, recent_path, and user_location are mandatory",
+            "error": "Missing required fields: animal, recent_path, and user_location",
             "status": "failed"
         }
 
+    # Load Historical Context
+    history_points = load_historical_data(animal)
+    has_history = len(history_points) > 0
+
     if len(recent_path) < WINDOW_SIZE:
+        # Fallback Logic
         try:
             last_lat, last_lon = float(recent_path[-1][0]), float(recent_path[-1][1])
             dist_km = haversine(user_location['lat'], user_location['lon'], last_lat, last_lon)
@@ -121,7 +135,7 @@ def predict_future_risk(input_data):
             final_risk = "Medium"
 
         return {
-            "error": f"Insufficient path history. Need at least {WINDOW_SIZE} recent GPS points (received {len(recent_path)})",
+            "error": f"Insufficient path history.",
             "status": "degraded",
             "animal": animal,
             "predicted_path": [],
@@ -139,31 +153,16 @@ def predict_future_risk(input_data):
         
         if not model:
             if model_used == "tensorflow_missing":
-                return {"error": "TensorFlow not installed in environment", "status": "failed"}
-            return {"error": "No trained LSTM models found (species or generic)", "status": "degraded", "animal": animal, "predicted_path": [], "risk_level": "Medium", "distance_to_user_km": 0, "model_used": "skipped"}
+                return {"error": "TensorFlow not installed", "status": "failed"}
+            return {"error": "No trained LSTM models found", "status": "degraded"}
 
         # Recursive multi-step prediction
         predicted_path = []
-        # Ensure points are floats and handled correctly
         path_array = np.array([[float(p[0]), float(p[1])] for p in recent_path])
         
-        # Calculate Deltas from recent path
-        # delta[i] = path[i+1] - path[i]
-        # We need at least WINDOW_SIZE deltas, so WINDOW_SIZE + 1 points
-        if len(path_array) < WINDOW_SIZE + 1:
-             # Fallback if we have enough points for WINDOW_SIZE but not enough for deltas?
-             # Actually, if we have 5 points, we have 4 deltas. We need 5 deltas.
-             # So we need 6 points to make 5 deltas.
-             # If we have fewer, we can't run the model properly.
-             # We will zero-pad the beginning if needed, or just return degraded.
-             pass 
-
-        # Calculate deltas
         deltas = np.diff(path_array, axis=0)
         
-        # If not enough deltas, pad with mean delta or zeros
         if len(deltas) < WINDOW_SIZE:
-            # Simple padding: repeat the last delta
             missing = WINDOW_SIZE - len(deltas)
             if len(deltas) > 0:
                 padding = np.tile(deltas[-1], (missing, 1))
@@ -172,30 +171,41 @@ def predict_future_risk(input_data):
                 deltas = np.zeros((WINDOW_SIZE, 2))
 
         current_sequence = deltas[-WINDOW_SIZE:]
-        last_gps = path_array[-1] # Start prediction from the last known point
+        last_gps = path_array[-1]
         
         for _ in range(k_future):
-            # Scale input
             lstm_input = scaler.transform(current_sequence.reshape(-1, 2)).reshape(1, WINDOW_SIZE, 2)
-            
-            # Predict next delta
             pred_scaled_delta = model.predict(lstm_input, verbose=0)
             pred_delta = scaler.inverse_transform(pred_scaled_delta)[0]
             
-            # Calculate next absolute point
-            next_gps = last_gps + pred_delta
+            # Historical Bias (Simple Gravity Model)
+            # If there's a nearby historical cluster, slightly pull the prediction towards it
+            if has_history:
+                next_raw = last_gps + pred_delta
+                # Find nearest historical point
+                nearest_pt = None
+                min_h_dist = float('inf')
+                for hp in history_points:
+                    d = np.sqrt((hp[0]-next_raw[0])**2 + (hp[1]-next_raw[1])**2) # Euclidian for speed
+                    if d < min_h_dist:
+                        min_h_dist = d
+                        nearest_pt = hp
+                
+                # If nearest point is close (e.g. within ~1km approx 0.01 deg), nudge
+                if nearest_pt and min_h_dist < 0.01:
+                    # Nudge 10% towards history
+                    nudge_vector = np.array(nearest_pt) - next_raw
+                    pred_delta += nudge_vector * 0.1
             
+            next_gps = last_gps + pred_delta
             predicted_path.append([float(next_gps[0]), float(next_gps[1])])
             
-            # Update state
             last_gps = next_gps
             current_sequence = np.vstack([current_sequence[1:], pred_delta])
 
-        # Evaluate risk for the immediate next predicted point
         next_lat, next_lon = predicted_path[0]
         dist_km = haversine(user_location['lat'], user_location['lon'], next_lat, next_lon)
         
-        # 4. Feed into Random Forest for classification
         rf_record = {
             "animal": animal,
             "distance_km": dist_km,
@@ -206,13 +216,10 @@ def predict_future_risk(input_data):
         try:
             rf_result = predict_risk(rf_record)
             final_risk = rf_result.get('risk', 'Low')
-        except Exception as rf_err:
-            final_risk = "Medium" # Fallback if RF fails
+        except Exception:
+            final_risk = "Medium"
             
-        # 5. SAFETY OVERRIDE (MANDATORY)
         safety_override = False
-        
-        # Check all predicted points for safety breach
         for p_lat, p_lon in predicted_path:
             p_dist = haversine(user_location['lat'], user_location['lon'], p_lat, p_lon)
             if p_dist < 0.5:
@@ -225,7 +232,7 @@ def predict_future_risk(input_data):
             "predicted_path": predicted_path,
             "risk_level": final_risk,
             "distance_to_user_km": round(float(dist_km), 3),
-            "model_used": model_used,
+            "model_used": f"{model_used}_plus_history",
             "safety_override": safety_override,
             "status": "success"
         }
@@ -234,13 +241,9 @@ def predict_future_risk(input_data):
         return {"error": f"Internal prediction logic error: {str(e)}", "status": "failed"}
 
 if __name__ == "__main__":
-    # Suppress all stdout/stderr from libraries during initialization
     devnull = open(os.devnull, 'w')
     old_stdout = sys.stdout
-    # We don't redirect sys.stdout yet because we need to print the final JSON
-    
     try:
-        # Step 2 fix: Support both stdin and command line argument
         input_str = ""
         if len(sys.argv) > 1:
             input_str = sys.argv[1]

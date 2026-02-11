@@ -79,7 +79,15 @@ def predict_risk(record):
             
         dist = float(record.get('distance_km', 0.0))
         animal = record.get('animal', 'unknown')
+        
+        # Handle flat or nested metadata
         meta = record.get('metadata', {})
+        if isinstance(meta, dict):
+            confidence = meta.get('confidence', record.get('confidence', 'unknown'))
+            scope = meta.get('scope', record.get('scope', 'unknown'))
+        else:
+            confidence = record.get('confidence', 'unknown')
+            scope = record.get('scope', 'unknown')
         
         # 2. Safe Categorical Encoding (matches training pipeline)
         def safe_encode(col, value):
@@ -90,8 +98,8 @@ def predict_risk(record):
             return int(le.transform([target])[0])
 
         animal_enc = safe_encode('animal', animal)
-        conf_enc = safe_encode('confidence', meta.get('confidence', 'unknown'))
-        scope_enc = safe_encode('scope', meta.get('scope', 'unknown'))
+        conf_enc = safe_encode('confidence', confidence)
+        scope_enc = safe_encode('scope', scope)
 
         # 3. Model Routing
         # Use species-specific model if available, otherwise use the 'Generic' model
