@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable, unstable_batchedUpdates } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable, unstable_batchedUpdates, Animated } from 'react-native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, type Region } from 'react-native-maps';
 import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState, UIMode } from '../types';
-import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS } from '../constants';
+import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS, canonicalScientific } from '../constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
 import AnimalDetailModal from './AnimalDetailModal';
 import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
-import { clusterAnimals, type AnimalCluster } from '../utils/clustering';
-import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
+import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistanceToPolyline } from '../services/geoService';
 import PredictionPanel from './PredictionPanel';
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
@@ -20,6 +21,8 @@ const DUMMY_COORDINATES_2 = [
     { latitude: 0, longitude: 0 }
 ];
 
+const BOTTOM_TAB_HEIGHT = 80;
+
 const PREDICTION_POINT_SLOTS = 3;
 
 
@@ -27,6 +30,7 @@ const PREDICTION_POINT_SLOTS = 3;
 interface RoutePlannerSheetProps {
     isOpen: boolean;
     onClose: () => void;
+    onSuccess?: () => void;
     onCalculateSafeRoute: (start: Location | string, end: Location | string, radius: number, mode: TravelMode) => Promise<Route | null>;
     routeStatus: AppState;
     routeMessage: string;
@@ -43,7 +47,7 @@ interface RoutePlannerSheetProps {
 }
 
 const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
-    isOpen, onClose, onCalculateSafeRoute, routeStatus, routeMessage,
+    isOpen, onClose, onSuccess, onCalculateSafeRoute, routeStatus, routeMessage,
     suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions,
     getCurrentLocation, nearbyRadiusKm, isLocationLoading, isRouteLoading,
     initialStartQuery, initialDestQuery
@@ -125,7 +129,11 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
                 setSelectedStart(null);
                 setSelectedDest(null);
                 onClearSuggestions();
-                onClose();
+                if (typeof onSuccess === 'function') {
+                    onSuccess();
+                } else {
+                    onClose();
+                }
             }
         }
     };
@@ -286,10 +294,23 @@ interface MapViewProps {
 }
 
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
+    const insets = useSafeAreaInsets();
+    let tabBarHeight = 0;
+    try {
+        tabBarHeight = useBottomTabBarHeight();
+    } catch (e) {
+        tabBarHeight = 0;
+    }
+
+    // Fallback if hook returns 0 (common in some Expo/Nav setups)
+    // 50 is approx standard tab bar height + bottom safe area
+    const bottomPadding = tabBarHeight > 0 ? tabBarHeight : (50 + insets.bottom);
+
+
     const { 
         userLocation, predictions, animationProgress, nearbyRadiusKm, 
         safeRoute, safePlaces, riskZones, riskySegments, isNavigating, liveLocation, navigationStats, 
-        onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
+        onStartNavigation, onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
         isPlaying, onPlay, onPause, isApproachingStart,
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
         isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation,
@@ -298,8 +319,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     } = props;
     
     const mapRef = useRef<MapView>(null);
-    const [uiMode, setUiMode] = useState<UIMode>(UIMode.MAP);
-    const [animalClusters, setAnimalClusters] = useState<AnimalCluster[]>([]);
+    // Removed duplicate uiMode declaration here
+    // Removed unused animalClusters state to simplify and stabilize
     const [selectedAnimal, setSelectedAnimal] = useState<{
         name: string;
         scientificName?: string;
@@ -321,552 +342,245 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [mapRegion, setMapRegion] = useState<{ latitudeDelta: number; longitudeDelta: number } | null>(null);
     const [isCenteringOnUser, setIsCenteringOnUser] = useState(false);
     
-    // LSTM Prediction State - STABLE: never unmounted
+    // Navigation & Loading State
+    const [isNavLoading, setIsNavLoading] = useState(false);
+    const bottomSheetTranslateY = useRef(new Animated.Value(300)).current;
+
+    
+
+    // --- RESTORED MISSING VARIABLES & LOGIC ---
+    const initialRegion = {
+        latitude: MAP_CENTER[0],
+        longitude: MAP_CENTER[1],
+        latitudeDelta: 0.0922,
+        longitudeDelta: 0.0421,
+    };
+
+    const [showAnimalMarkers, setShowAnimalMarkers] = useState(true);
+
+    // Enforce stable initial state for arrays
+    const [uiMode, setUiMode] = useState<UIMode>(UIMode.MAP);
+    
+    useEffect(() => {
+        const fetchAddress = async () => {
+            if (!selectedAnimal || selectedAnimal.address) return;
+            try {
+                const addr = await api.reverseGeocode(selectedAnimal.lat, selectedAnimal.lon);
+                if (addr && addr.trim().length > 0) {
+                    setSelectedAnimal(prev => prev ? { ...prev, address: addr } : prev);
+                }
+            } catch (e) {
+                // ignore reverse geocoding failure; fallback will be lat/lon
+            }
+        };
+        fetchAddress();
+    }, [selectedAnimal]);
+    
+    useEffect(() => {
+        const shouldShowSheet =
+            isNavLoading ||
+            (!isNavigating && uiMode === UIMode.ROUTE_SUMMARY && !!safeRoute);
+        Animated.timing(bottomSheetTranslateY, {
+            toValue: shouldShowSheet ? 0 : 300,
+            duration: 300,
+            useNativeDriver: true,
+        }).start();
+    }, [isNavLoading, isNavigating, safeRoute, uiMode]);
+    
+    // Stable derived state
+    const filteredPredictions = useMemo(() => {
+        if (!Array.isArray(predictions)) return [];
+        return predictions.filter(p => visibleAnimals[p.common] !== false);
+    }, [predictions, visibleAnimals]);
+
+    // ... (keep existing methods)
+
+    // LSTM Prediction State - STABLE initialization
     const [predictedPath, setPredictedPath] = useState<{ lat: number, lon: number, address: string }[]>([]);
-    const safePredictedPath = predictedPath;
-    const [predictionLoading, setPredictionLoading] = useState(false);
     const [predictionRisk, setPredictionRisk] = useState<string | null>(null);
     const [predictedAnimalName, setPredictedAnimalName] = useState<string>('');
     const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
 
-    const animalTypes = useMemo(() => Array.from(new Set(predictions.map(p => p.common))).sort(), [predictions]);
+    // --- RESTORED HANDLERS & HELPERS ---
 
-    useEffect(() => {
-        if (props.initialRouteStart && props.initialRouteEnd) {
-            setUiMode(UIMode.ROUTE_PLANNER);
+    const [predictionLoading, setPredictionLoading] = useState(false);
+    
+    const animalTypes = useMemo(() => Object.keys(ANIMALS), []);
+
+    const processedSafePlaces = useMemo(() => {
+        if (!Array.isArray(safePlaces)) return [];
+        const base = safePlaces.filter(p => p.lat && p.lon);
+        if (isNavigating && safeRoute?.path) {
+            return base.filter(p => {
+                const dist = calculateMinDistanceToPolyline(
+                    { lat: Number(p.lat), lon: Number(p.lon) },
+                    safeRoute.path
+                );
+                return dist <= 5;
+            });
         }
-    }, [props.initialRouteStart, props.initialRouteEnd]);
+        return base;
+    }, [safePlaces, safeRoute, isNavigating]);
 
-    useEffect(() => {
-        if (safeRoute && routeStatus === AppState.SUCCESS && !isNavigating) {
-            setUiMode(UIMode.ROUTE_SUMMARY);
-        }
-    }, [safeRoute, routeStatus, isNavigating]);
+    const safePredictedPath = useMemo(() => {
+        if (!Array.isArray(predictedPath)) return [];
+        return predictedPath.map(p => ({ 
+            lat: p.lat, 
+            lon: p.lon, 
+            address: p.address || '' 
+        }));
+    }, [predictedPath]);
 
-    useEffect(() => {
-        let hasChanged = false;
-        const newVisibleAnimals = { ...visibleAnimals };
-        animalTypes.forEach(animalName => {
-            if (typeof newVisibleAnimals[animalName] === 'undefined') {
-                newVisibleAnimals[animalName] = true;
-                hasChanged = true;
-            }
-        });
-        if (hasChanged) {
-            setVisibleAnimals(newVisibleAnimals);
-        }
-    }, [animalTypes, visibleAnimals, setVisibleAnimals]);
+    const handleToggleAnimal = useCallback((animal: string) => {
+        setVisibleAnimals(prev => ({
+            ...prev,
+            [animal]: !prev[animal]
+        }));
+    }, [setVisibleAnimals]);
 
-    const handleToggleAnimal = (commonName: string) => {
-        setVisibleAnimals(prev => ({...prev, [commonName]: !prev[commonName]}));
-    };
-
-    const filteredPredictions = useMemo(() => {
-        if (!showPredictions) return [];
-        return predictions.filter(p => visibleAnimals[p.common]);
-    }, [predictions, visibleAnimals, showPredictions]);
-
-    useEffect(() => {
-        const easedProgress = easeInOutSine(animationProgress / ANIMATION_STEPS);
-        const firstPred = filteredPredictions[0];
-        if (firstPred && firstPred.fullPath.length > 1) {
-             pathIndexRef.current = Math.floor(easedProgress * (firstPred.fullPath.length - 1));
-        } else {
-            pathIndexRef.current = 0;
-        }
-    }, [animationProgress, filteredPredictions]);
-
-    useEffect(() => {
-        const latest = reports.find(r => typeof r.lat === 'number' && typeof r.lon === 'number');
-        if (latest && mapRef.current) {
+    const handleCenterOnUser = useCallback(async () => {
+        if (userLocation && mapRef.current) {
+            setIsCenteringOnUser(true);
             mapRef.current.animateToRegion({
-                latitude: latest.lat as number,
-                longitude: latest.lon as number,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02
-            }, 800);
-        }
-    }, [reports]);
-    // Optimized clustering using spatial grid algorithm
-    useEffect(() => {
-        if (filteredPredictions.length === 0) {
-            setAnimalClusters([]);
-            return;
-        }
-        const pathIndex = pathIndexRef.current;
-        const clusters = clusterAnimals(filteredPredictions, pathIndex, 0.01);
-        setAnimalClusters(clusters);
-    }, [filteredPredictions, animationProgress]);
-
-    const handleViewDetails = useCallback((animal: AnimalPrediction) => {
-        setDetailModalAnimal(animal);
-        // Also populate selectedAnimal for the generic detail view to work and to enable prediction
-        setSelectedAnimal({
-            name: animal.common,
-            image_url: animal.image,
-            date: new Date().toISOString(), 
-            metadata: { scope: 'prediction', confidence: 'high' },
-            lat: animal.current.lat,
-            lon: animal.current.lon,
-            address: animal.current.addr,
-            fullPath: animal.fullPath
-        });
-        setUiMode(UIMode.DETAIL);
-    }, []);
-
-    useEffect(() => {
-        let isMounted = true;
-        const fetchAddress = async () => {
-            if (selectedAnimal && !selectedAnimal.address) {
-                try {
-                    const address = await api.reverseGeocode(selectedAnimal.lat, selectedAnimal.lon);
-                    if (isMounted) {
-                        setSelectedAnimal(prev => prev ? { ...prev, address } : null);
-                    }
-                } catch (error) {
-                    console.error('[MapView] Error fetching address for selected animal:', error);
+                latitude: userLocation.lat,
+                longitude: userLocation.lon,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            }, 1000);
+            setTimeout(() => setIsCenteringOnUser(false), 1000);
+        } else {
+             try {
+                setIsCenteringOnUser(true);
+                const loc = await getCurrentLocation();
+                if (loc && mapRef.current) {
+                     mapRef.current.animateToRegion({
+                        latitude: loc.lat,
+                        longitude: loc.lon,
+                        latitudeDelta: 0.01,
+                        longitudeDelta: 0.01,
+                    }, 1000);
                 }
-            }
-        };
-        fetchAddress();
-        return () => { isMounted = false; };
-    }, [selectedAnimal?.lat, selectedAnimal?.lon]);
-
-    const handlePredictMovement = async () => {
-        if (!selectedAnimal || !userLocation) {
-            if (!userLocation) Alert.alert("Location Required", "Please enable location services to use prediction.");
-            return;
+             } catch (e) {
+                  Alert.alert('Location Error', 'Could not fetch current location.');
+             } finally {
+                 setIsCenteringOnUser(false);
+             }
         }
-        
+    }, [userLocation, getCurrentLocation]);
+
+    const handleStartNavigation = useCallback(() => {
+        if (safeRoute) {
+            onStartNavigation();
+        }
+    }, [safeRoute, onStartNavigation]);
+
+    const handlePredictMovement = useCallback(async () => {
+        if (!selectedAnimal) return;
         setPredictionLoading(true);
-        console.log('[MapView] Fetching prediction from backend API');
-        
-        // Capture animal data before clearing state
-        const animalData = { ...selectedAnimal };
-        
         try {
-            const animalLat = animalData.lat ?? 0;
-            const animalLon = animalData.lon ?? 0;
+            // Prepare arguments for the service call
+            const animalName = selectedAnimal.scientificName || selectedAnimal.name;
+            
+            // Use user location if available, otherwise use default
+            const userLoc = userLocation 
+                ? { lat: userLocation.lat, lon: userLocation.lon }
+                : { lat: selectedAnimal.lat, lon: selectedAnimal.lon }; // Fallback to animal loc if user loc missing
 
-            // Build recent path:
-            // 1) Prefer fullPath if available and has enough history
-            // 2) Else construct from recent sightings of the same species (last 5 by date)
-            // 3) Else fall back to current point
-            let recentPath: [number, number][] = [];
-            if (animalData.fullPath && animalData.fullPath.length >= 5) {
-                recentPath = animalData.fullPath.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lon]);
-            } else {
-                const sciName = animalData.scientificName;
-                if (sciName) {
-                    const sameSpecies = recentSightings
-                        .filter(s => s.scientificName === sciName)
-                        .sort((a, b) => {
-                            const ta = new Date(a.date).getTime();
-                            const tb = new Date(b.date).getTime();
-                            return ta - tb;
-                        })
-                        .slice(-5)
-                        .map(s => [s.lat, s.lon] as [number, number]);
-                    if (sameSpecies.length >= 2) {
-                        recentPath = sameSpecies;
-                    }
-                }
-                if (recentPath.length === 0) {
-                    recentPath = [[animalLat, animalLon]];
-                }
-                if (recentPath.length === 1) {
-                    const [lat, lon] = recentPath[0];
-                    recentPath = [
-                        [lat, lon],
-                        [lat + 0.0001, lon + 0.0001]
-                    ];
-                }
-            }
+            // Construct recent path (current animal position)
+            const recentPath: [number, number][] = [[selectedAnimal.lat, selectedAnimal.lon]];
 
+            // Use API to predict
             const result = await api.predictMovement(
-                animalData.name,
-                userLocation,
+                animalName,
+                userLoc,
                 recentPath,
-                3 // k_future
+                3 // kFuture
             );
-
-            if (result && Array.isArray(result.predicted_path) && result.predicted_path.length > 0) {
-                const baseLat = Number(animalData.lat ?? 0);
-                const baseLon = Number(animalData.lon ?? 0);
-                const baseAddr = String(animalData.address || 'current area');
-                const toRad = (d: number) => (d * Math.PI) / 180;
-                const toDeg = (r: number) => (r * 180) / Math.PI;
-                const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                    const R = 6371;
-                    const dLat = toRad(lat2 - lat1);
-                    const dLon = toRad(lon2 - lon1);
-                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                    return R * c;
-                };
-                const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-                    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-                    const brng = toDeg(Math.atan2(y, x));
-                    return (brng + 360) % 360;
-                };
-                const dirOf = (deg: number) => {
-                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-                    const idx = Math.round(deg / 45) % 8;
-                    return dirs[idx];
-                };
-                const enriched = result.predicted_path.map(p => {
-                    const lat = Number(p.lat), lon = Number(p.lon);
-                    let address = p.address;
-                    if (!address || address.startsWith('Unknown')) {
-                        const d = haversineKm(baseLat, baseLon, lat, lon);
-                        const b = bearingDeg(baseLat, baseLon, lat, lon);
-                        address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
+            
+            if (result && Array.isArray(result.path)) {
+                // Enrich path with addresses if missing
+                const enrichedPath = await Promise.all(result.path.map(async (p) => {
+                    if (!p.address || p.address.trim() === '') {
+                        const addr = await api.reverseGeocode(p.lat, p.lon);
+                        return { ...p, address: addr };
                     }
-                    return { lat, lon, address };
-                });
-                unstable_batchedUpdates(() => {
-                    setPredictedPath(enriched);
-                    setPredictionRisk(result.risk_level);
-                    setPredictedAnimalName(animalData.name);
-                    setSelectedPointIndex(null);
-                    setSelectedAnimal(null);
-                    setUiMode(UIMode.PREDICTION);
-                });
-
-                if (result.status === 'degraded') {
-                    console.warn(`[MapView] Prediction received in degraded mode: ${result.message || 'Check logs'}`);
-                }
-
-                if (mapRef.current && enriched.length > 0) {
-                    const coords = enriched
-                        .map(p => ({ latitude: Number(p.lat), longitude: Number(p.lon) }))
-                        .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-                    const endLat = Number(animalData.lat);
-                    const endLon = Number(animalData.lon);
-                    if (Number.isFinite(endLat) && Number.isFinite(endLon)) coords.push({ latitude: endLat, longitude: endLon });
-                    if (coords.length > 0) {
-                    mapRef.current.fitToCoordinates(coords, {
-                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                        animated: true
-                    });
-                    }
-                }
+                    return p;
+                }));
+                
+                setPredictedPath(enrichedPath);
+                setPredictionRisk(result.risk_level);
+                setPredictedAnimalName(selectedAnimal.name);
+                setUiMode(UIMode.PREDICTION);
             } else {
-                const k = 3;
-                const path = Array.isArray(recentPath) ? recentPath : [];
-                const n = path.length;
-                let lastLat = 0, lastLon = 0, dLat = 0.0005, dLon = 0.0005;
-                if (n >= 1) { lastLat = Number(path[n - 1][0]); lastLon = Number(path[n - 1][1]); }
-                if (n >= 2) {
-                    const prevLat = Number(path[n - 2][0]);
-                    const prevLon = Number(path[n - 2][1]);
-                    dLat = lastLat - prevLat;
-                    dLon = lastLon - prevLon;
-                    dLat = Math.max(Math.min(dLat, 0.01), -0.01);
-                    dLon = Math.max(Math.min(dLon, 0.01), -0.01);
-                }
-                const synth = [];
-                for (let i = 1; i <= k; i++) synth.push([lastLat + dLat * i, lastLon + dLon * i]);
-                const baseLat = Number(animalData.lat ?? 0);
-                const baseLon = Number(animalData.lon ?? 0);
-                const baseAddr = String(animalData.address || 'current area');
-                const toRad = (d: number) => (d * Math.PI) / 180;
-                const toDeg = (r: number) => (r * 180) / Math.PI;
-                const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                    const R = 6371;
-                    const dLat = toRad(lat2 - lat1);
-                    const dLon = toRad(lon2 - lon1);
-                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                    return R * c;
-                };
-                const bearingDeg = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-                    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-                    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-                    const brng = toDeg(Math.atan2(y, x));
-                    return (brng + 360) % 360;
-                };
-                const dirOf = (deg: number) => {
-                    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-                    const idx = Math.round(deg / 45) % 8;
-                    return dirs[idx];
-                };
-                const enhanced = synth.map(([lat, lon]) => {
-                    const d = haversineKm(baseLat, baseLon, lat, lon);
-                    const b = bearingDeg(baseLat, baseLon, lat, lon);
-                    const address = `${d.toFixed(1)} km ${dirOf(b)} of ${baseAddr}`;
-                    return { lat, lon, address };
-                });
-                unstable_batchedUpdates(() => {
-                    setPredictedPath(enhanced);
-                    setPredictionRisk('Medium');
-                    setPredictedAnimalName(animalData.name);
-                    setSelectedPointIndex(null);
-                    setSelectedAnimal(null);
-                    setUiMode(UIMode.PREDICTION);
-                });
-                if (mapRef.current && enhanced.length > 0) {
-                    const coords = enhanced
-                        .map(p => ({ latitude: Number(p.lat), longitude: Number(p.lon) }))
-                        .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-                    const endLat = Number(animalData.lat);
-                    const endLon = Number(animalData.lon);
-                    if (Number.isFinite(endLat) && Number.isFinite(endLon)) coords.push({ latitude: endLat, longitude: endLon });
-                    if (coords.length > 0) {
-                    mapRef.current.fitToCoordinates(coords, {
-                        edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
-                        animated: true
-                    });
-                    }
-                }
+                 Alert.alert('Prediction Unavailable', 'Could not generate a prediction path for this animal.');
             }
         } catch (e) {
-            console.error('[MapView] Error in prediction flow:', e);
-            Alert.alert("Error", "An error occurred while fetching movement prediction.");
+            console.error('Prediction error:', e);
+            Alert.alert('Error', 'Failed to predict movement. Please try again.');
         } finally {
             setPredictionLoading(false);
         }
-    };
+    }, [selectedAnimal]);
 
-    const handlePointSelect = (point: { lat: number, lon: number, address: string }, index: number) => {
+    const handlePointSelect = useCallback((point: any, index: number) => {
         setSelectedPointIndex(index);
-        if (mapRef.current) {
-            mapRef.current.animateToRegion({
-                latitude: point.lat,
-                longitude: point.lon,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-            }, 1000);
-        }
-    };
+        mapRef.current?.animateToRegion({
+            latitude: point.lat,
+            longitude: point.lon,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005
+        }, 500);
+    }, []);
 
-    const initialRegion = useMemo(() => {
-        if (userLocation) {
-            return {
-                latitude: userLocation.lat,
-                longitude: userLocation.lon,
-                latitudeDelta: 0.1,
-                longitudeDelta: 0.1,
-            };
-        }
-        return {
-            latitude: MAP_CENTER[0],
-            longitude: MAP_CENTER[1],
-            latitudeDelta: 0.5,
-            longitudeDelta: 0.5,
-        };
-    }, [userLocation]);
-
-    const effectiveLatitudeDelta = mapRegion?.latitudeDelta ?? initialRegion.latitudeDelta;
-    // Relaxed zoom limit to allow viewing distant animals (e.g. Bison in US while user in India)
-    const isZoomSufficient = effectiveLatitudeDelta <= 50.0;
-    const showAnimalMarkers = showPredictions || isZoomSufficient;
-
-    const handleCenterOnUser = useCallback(async () => {
-        if (isCenteringOnUser || isLocationLoading) return;
-        setIsCenteringOnUser(true);
-        try {
-            const loc = await getCurrentLocation();
-            if (mapRef.current && loc) {
-                mapRef.current.animateToRegion(
-                    {
-                        latitude: loc.lat,
-                        longitude: loc.lon,
-                        latitudeDelta: 0.05,
-                        longitudeDelta: 0.05,
-                    },
-                    600
-                );
-            }
-        } catch {
-        } finally {
-            setIsCenteringOnUser(false);
-        }
-    }, [getCurrentLocation, isCenteringOnUser, isLocationLoading]);
-
-    const { completedPath, remainingPath } = useMemo(() => {
-        if (isNavigating && safeRoute && liveLocation) {
-            const completed = safeRoute.path.slice(0, closestPathIndex + 1);
-            const remaining = safeRoute.path.slice(closestPathIndex);
-            remaining.unshift([liveLocation.lat, liveLocation.lon]);
-            return { completedPath: completed, remainingPath: remaining };
-        }
-        return { completedPath: [], remainingPath: safeRoute?.path || [] };
-    }, [isNavigating, safeRoute, liveLocation, closestPathIndex]);
-
-    const predictedPointsSanitized = useMemo(() => {
-        return safePredictedPath
-            .map((pt) => ({
-                lat: Number(pt?.lat),
-                lon: Number(pt?.lon),
-                address: String(pt?.address || '')
-            }))
-            .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
-    }, [safePredictedPath]);
-
+    // STABLE MEMOIZATION for map children props
     const predictedPolylineCoords = useMemo(() => {
-        const coords = predictedPointsSanitized.map((p) => ({ latitude: p.lat, longitude: p.lon }));
-        return coords.length >= 2 ? coords : DUMMY_COORDINATES_2;
-    }, [predictedPointsSanitized]);
-
-    const predictedPolylineStrokeWidth = predictedPointsSanitized.length >= 2 ? 4 : 0;
-
-    const predictedMarkerSlots = useMemo(() => {
-        const slots: { lat: number; lon: number; address: string; visible: boolean; index: number }[] = [];
-        for (let i = 0; i < PREDICTION_POINT_SLOTS; i++) {
-            const p = predictedPointsSanitized[i];
-            if (p) {
-                slots.push({ lat: p.lat, lon: p.lon, address: p.address, visible: true, index: i });
-            } else {
-                slots.push({ lat: 0, lon: 0, address: '', visible: false, index: i });
-            }
-        }
-        return slots;
-    }, [predictedPointsSanitized]);
-
-    const remainingPolylineCoords = useMemo(() => {
-        if (!Array.isArray(remainingPath)) return [];
-        return remainingPath
-            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
-            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-    }, [remainingPath]);
-
-    const completedPolylineCoords = useMemo(() => {
-        if (!Array.isArray(completedPath)) return [];
-        return completedPath
-            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
-            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-    }, [completedPath]);
+        if (!Array.isArray(predictedPath)) return [];
+        return predictedPath.map(p => ({ latitude: p.lat, longitude: p.lon }));
+    }, [predictedPath]);
 
     const safeRoutePolylineCoords = useMemo(() => {
-        if (!safeRoute || !Array.isArray(safeRoute.path)) return [];
-        return safeRoute.path
-            .map((p: any) => ({ latitude: Number(p?.[0]), longitude: Number(p?.[1]) }))
-            .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+        if (!safeRoute?.path) return [];
+        return safeRoute.path.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
     }, [safeRoute]);
 
-    // Map camera control
-    useEffect(() => {
-        if (!mapRef.current) return;
+    const remainingPolylineCoords = useMemo(() => {
+        if (!safeRoute?.path || !isNavigating) return [];
+        return safeRoute.path.slice(closestPathIndex).map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
+    }, [safeRoute, isNavigating, closestPathIndex]);
+
+    const completedPolylineCoords = useMemo(() => {
+        if (!safeRoute?.path || !isNavigating) return [];
+        return safeRoute.path.slice(0, closestPathIndex + 1).map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
+    }, [safeRoute, isNavigating, closestPathIndex]);
+
+    // Flatten data for markers to ensure stable keys and no undefined access
+    const reportMarkers = useMemo(() => (Array.isArray(reports) ? reports : []).filter(r => r.lat && r.lon), [reports]);
+    // FIX 1: Filter animals by route proximity when navigating
+    const animalMarkers = useMemo(() => {
+        const base = (showAnimalMarkers && recentSightings ? recentSightings : []).filter(s => s.lat && s.lon);
         
-        if (isNavigating && liveLocation) {
-            if (isApproachingStart && safeRoute && safeRoute.path.length > 0) {
-                const startPoint = safeRoute.path[0];
-                mapRef.current.fitToCoordinates(
-                    [
-                        { latitude: liveLocation.lat, longitude: liveLocation.lon },
-                        { latitude: startPoint[0], longitude: startPoint[1] }
-                    ],
-                    { edgePadding: { top: 100, right: 50, bottom: 100, left: 50 }, animated: true }
-                );
-            } else {
-                mapRef.current.animateToRegion({
-                    latitude: liveLocation.lat,
-                    longitude: liveLocation.lon,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                }, 1000);
-            }
-        } else if (safeRoute && safeRoute.path.length > 0) {
-            const routeCoords = safeRoute.path
-                .map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))
-                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-            const safeCoords = (Array.isArray(safePlaces) ? safePlaces : [])
-                .map((p: any) => ({ latitude: Number(p?.lat), longitude: Number(p?.lon) }))
-                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-            const coordinates = [...routeCoords, ...safeCoords];
-            if (coordinates.length > 0) {
-                mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 60, right: 60, bottom: 260, left: 60 }, animated: true });
-            }
-        } else if (userLocation) {
-            mapRef.current.animateToRegion({
-                latitude: userLocation.lat,
-                longitude: userLocation.lon,
-                latitudeDelta: 0.1,
-                longitudeDelta: 0.1,
-            }, 1000);
-        } else if (recentSightings.length > 0) {
-            const coordinates = recentSightings.map(s => ({ latitude: s.lat, longitude: s.lon }));
-            mapRef.current.fitToCoordinates(coordinates, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
+        if (isNavigating && safeRoute?.path) {
+            return base.filter(s => {
+                const dist = calculateMinDistanceToPolyline({ lat: Number(s.lat), lon: Number(s.lon) }, safeRoute.path);
+                return dist <= 5; // 5km threshold
+            });
         }
-    }, [userLocation, safeRoute, isNavigating, liveLocation, isApproachingStart, recentSightings, safePlaces]);
+        return base;
+    }, [showAnimalMarkers, recentSightings, isNavigating, safeRoute]);
+    
+    // 🔎 STEP 1 – LOG RAW DATA
+    console.log("ANIMALS BEFORE RENDER:", animalMarkers.map(a => ({ id: a.id, emoji: a.emoji, name: a.name })));
 
-    const processedSafePlaces = useMemo(() => {
-        const sanitized = (Array.isArray(safePlaces) ? safePlaces : [])
-            .map((p) => ({
-                ...p,
-                lat: Number((p as any).lat),
-                lon: Number((p as any).lon),
-            }))
-            .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
-
-        if (!safeRoute) return sanitized.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
-
-        const placesWithDist = sanitized.map(place => {
-            const distKm = calculateMinDistanceToPolyline({ lat: place.lat, lon: place.lon }, safeRoute.path);
-            return { ...place, distKm };
-        });
-
-        const maxDistKm = 5;
-        const nearby = placesWithDist.filter(p => typeof p.distKm === 'number' && p.distKm <= maxDistKm);
-        const selected = nearby.length > 0 ? nearby : placesWithDist.slice(0, 10);
-
-        return selected.map(p => {
-            const distKm = typeof p.distKm === 'number' ? p.distKm : undefined;
-            const distMeters = typeof distKm === 'number' ? distKm * 1000 : 0;
-            const durationMin = typeof distKm === 'number' ? (distKm / 5) * 60 : 0;
-            return {
-                ...p,
-                distanceStr: typeof distKm === 'number' ? formatDistance(distMeters) : undefined,
-                durationStr: typeof distKm === 'number' ? formatDuration(durationMin) : undefined
-            };
-        });
-    }, [safePlaces, safeRoute]);
+    // FIX: Offset risk markers so they appear next to the animal
+    // Removed riskZoneMarkers to eliminate ⚠️ icons from map
 
     return (
         <View style={styles.container}>
-            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-                <LoadingOverlay visible={isWildlifeLoading} message="Loading wildlife data..." />
-            </View>
-
-            {/* STABLE OVERLAYS - Always mounted, controlled by visibility */}
-            <View style={[StyleSheet.absoluteFill, { opacity: uiMode === UIMode.MAP ? 1 : 0, pointerEvents: uiMode === UIMode.MAP ? 'auto' : 'none' }]}>
-            </View>
-
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Wildlife Safety Map</Text>
-                <View style={styles.headerActions}>
-                    <TouchableOpacity style={styles.headerButton} onPress={() => setIsFilterPanelOpen(!isFilterPanelOpen)}>
-                        <FilterIcon width={22} height={22} color="#374151" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headerButton} onPress={() => setUiMode(UIMode.ROUTE_PLANNER)}>
-                        <PaperPlaneIcon width={22} height={22} color="#374151" />
-                        <Text style={styles.routeButtonText}>Route</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            <View style={styles.mapContainer}>
-                <View style={styles.alertOverlay} pointerEvents="box-none">
-                    {isNavigating && navigationAlert && (
-                        <View style={styles.alertBanner}>
-                            <AlertTriangleIcon width={24} height={24} color="#f59e0b" />
-                            <View style={styles.alertContent}>
-                                <Text style={styles.alertTitle}>Navigation Alert!</Text>
-                                <Text style={styles.alertMessage}>{navigationAlert.message}</Text>
-                            </View>
-                            <TouchableOpacity onPress={clearNavigationAlert}>
-                                <XIcon width={20} height={20} color="#6b7280" />
-                            </TouchableOpacity>
-                        </View>
-                    )}
-                </View>
-
+            <View style={styles.screen}>
                 <MapView
                     ref={mapRef}
                     provider={PROVIDER_GOOGLE}
-                    style={styles.map}
+                    style={StyleSheet.absoluteFillObject}
                     initialRegion={initialRegion}
                     showsUserLocation={!isNavigating && !!userLocation}
                     showsMyLocationButton={false}
@@ -874,354 +588,336 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
                     }
                 >
-                    <>
-                    {Array.isArray(reports) ? reports.filter(r => typeof r.lat === 'number' && typeof r.lon === 'number').map(r => (
-                        <Marker
-                            key={`report-${r.id}`}
-                            coordinate={{ latitude: r.lat as number, longitude: r.lon as number }}
-                            title={r.wildlifeType || r.ai?.common || 'Report'}
-                            description={r.location}
-                            onPress={() => {
-                                setSelectedAnimal({
-                                    name: r.wildlifeType || r.ai?.common || 'Report',
-                                    image_url: r.imageUri,
-                                    date: r.timestamp,
-                                    metadata: { scope: 'report', confidence: 'medium' },
-                                    lat: r.lat as number,
-                                    lon: r.lon as number,
-                                    address: r.location
-                                });
-                                setUiMode(UIMode.DETAIL);
-                            }}
-                        >
-                            <View style={styles.markerContainer}>
-                                <Text style={styles.animalEmoji}>
-                                    {(() => {
-                                        const t = (r.wildlifeType || r.ai?.common || '').toLowerCase();
-                                        if (t.includes('tiger')) return '🐅';
-                                        if (t.includes('elephant')) return '🐘';
-                                        if (t.includes('bear')) return '🐻';
-                                        if (t.includes('leopard')) return '🐆';
-                                        if (t.includes('gaur')) return '🐃';
-                                        if (t.includes('bison')) return '🦬';
-                                        return '🐾';
-                                    })()}
-                                </Text>
-                            </View>
-                            <Callout>
-                                <View style={{ maxWidth: 240 }}>
-                                    <Text style={{ fontWeight: 'bold' }}>{r.wildlifeType || r.ai?.common}</Text>
-                                    {r.ai?.scientific ? <Text style={{ color: '#6b7280' }}>{r.ai.scientific}</Text> : null}
-                                    <Text>{r.description}</Text>
-                                    <Text style={{ color: '#6b7280' }}>{new Date(r.timestamp).toLocaleString()}</Text>
-                                    {r.imageUri ? (
-                                        <Image source={{ uri: r.imageUri }} style={{ width: 200, height: 120, marginTop: 6, borderRadius: 6 }} />
-                                    ) : null}
-                                </View>
-                            </Callout>
-                        </Marker>
-                    )) : null}
-                    <Marker
-                        key="live-location"
-                        coordinate={{
-                            latitude: Number(isNavigating && liveLocation ? liveLocation.lat : 0),
-                            longitude: Number(isNavigating && liveLocation ? liveLocation.lon : 0)
-                        }}
-                        title={isNavigating && liveLocation ? "Your Location" : ""}
-                        description={isNavigating && liveLocation ? liveLocation.name : ""}
-                        opacity={isNavigating && liveLocation ? 1 : 0}
-                    />
-
-                    {isNavigating && liveLocation && showNearbyRadius ? (
-                        <Circle
-                            center={{ latitude: liveLocation.lat, longitude: liveLocation.lon }}
-                            radius={nearbyRadiusKm * 1000}
-                            strokeColor="#f97316"
-                            fillColor="rgba(249, 115, 22, 0.1)"
-                            strokeWidth={1}
+                    {/* 1. ROUTE POLYLINES (Always bottom layer) */}
+                    {safeRoutePolylineCoords.length > 0 && (
+                        <Polyline
+                            key="route-full"
+                            coordinates={safeRoutePolylineCoords}
+                            strokeColor="#16a34a"
+                            strokeWidth={!isNavigating ? 5 : 0}
+                            zIndex={1}
+                            lineCap="round"
+                            lineJoin="round"
                         />
-                    ) : null}
+                    )}
+                    {remainingPolylineCoords.length > 0 && (
+                        <Polyline
+                            key="route-remaining"
+                            coordinates={remainingPolylineCoords}
+                            strokeColor="#16a34a"
+                            strokeWidth={isNavigating ? 5 : 0}
+                            zIndex={1}
+                            lineCap="round"
+                            lineJoin="round"
+                        />
+                    )}
+                    {completedPolylineCoords.length > 0 && (
+                        <Polyline
+                            key="route-completed"
+                            coordinates={completedPolylineCoords}
+                            strokeColor="#6b7280"
+                            strokeWidth={isNavigating ? 5 : 0}
+                            lineDashPattern={[5, 10]}
+                            zIndex={1}
+                            lineCap="round"
+                            lineJoin="round"
+                        />
+                    )}
 
-                    {/* NOTE: With Fabric (new architecture) + react-native-maps, keep MapView child hierarchy stable to avoid addViewAt crashes on Android. */}
-                    {/* LSTM Predicted Path (always rendered; hidden when insufficient points) */}
-                    <Polyline
-                        key="predicted-path"
-                        coordinates={predictedPolylineCoords}
-                        strokeColor={
-                            predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
-                            predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
+                    {/* 2. ANIMAL MARKERS (Filtered if navigating) */}
+                    {animalMarkers.map((sighting, index) => {
+                        // 1. Normalize emoji field (handle typo in backend data)
+                        let emoji = sighting.emoji || sighting.emojji;
+
+                        // 2. Try to lookup if missing
+                        if (!emoji && sighting.scientificName) {
+                            const entry = ANIMALS[sighting.scientificName];
+                            if (entry) emoji = entry.emoji;
                         }
-                        strokeWidth={predictedPolylineStrokeWidth}
-                        lineDashPattern={[5, 5]}
-                        zIndex={10}
-                    />
-                    
-                    {/* Predicted points (always rendered; hidden when not available) */}
-                    {predictedMarkerSlots.map((p) => (
-                        <Marker
-                            key={`pred-point-${p.index}`}
-                            coordinate={{ latitude: p.lat, longitude: p.lon }}
-                            opacity={p.visible ? 1 : 0}
-                            onPress={() => {
-                                if (!p.visible) return;
-                                handlePointSelect({ lat: p.lat, lon: p.lon, address: p.address }, p.index);
-                            }}
-                        >
-                            {p.visible ? (
-                                <Callout tooltip={true}>
-                                    <View style={styles.customCallout}>
-                                        <Text style={styles.calloutTitle}>Next Location #{p.index + 1}</Text>
-                                        <Text style={styles.calloutDetail}>{p.address || 'Unknown forest area (coordinates available)'}</Text>
-                                        <Text style={[styles.calloutDetail, { marginTop: 4, fontStyle: 'italic' }]}>
-                                            Lat: {p.lat.toFixed(4)}, Lon: {p.lon.toFixed(4)}
-                                        </Text>
-                                    </View>
-                                </Callout>
-                            ) : (
-                                <View />
-                            )}
-                            <View style={[
-                                styles.indexCircle,
-                                {
-                                    backgroundColor:
-                                        predictionRisk?.toLowerCase() === 'high' ? '#ef4444' :
-                                        predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981',
-                                    transform: [{ scale: selectedPointIndex === p.index ? 1.2 : 0.8 }],
-                                    opacity: p.visible ? 1 : 0
-                                }
-                            ]}>
-                                <Text style={styles.indexText}>{p.index + 1}</Text>
-                            </View>
-                        </Marker>
-                    ))}
+                        if (!emoji && sighting.name) {
+                            const entry = Object.values(ANIMALS).find(a => a.common === sighting.name);
+                            if (entry) emoji = entry.emoji;
+                        }
 
-                    <>
-                            <Polyline
-                                key="route-full"
-                                coordinates={Array.isArray(safeRoutePolylineCoords) && safeRoutePolylineCoords.length >= 2 ? safeRoutePolylineCoords : DUMMY_COORDINATES_2}
-                                strokeColor="#10b981"
-                                strokeWidth={!isNavigating && Array.isArray(safeRoutePolylineCoords) && safeRoutePolylineCoords.length >= 2 ? 6 : 0}
-                                zIndex={1}
-                            />
-                            <Polyline
-                                key="route-remaining"
-                                coordinates={Array.isArray(remainingPolylineCoords) && remainingPolylineCoords.length >= 2 ? remainingPolylineCoords : DUMMY_COORDINATES_2}
-                                strokeColor="#10b981"
-                                strokeWidth={isNavigating && Array.isArray(remainingPolylineCoords) && remainingPolylineCoords.length >= 2 ? 6 : 0}
-                                zIndex={1}
-                            />
+                        // 3. Safety Check: Only render if we have valid coordinates AND an emoji
+                        if (!emoji || !sighting.lat || !sighting.lon) {
+                            return null;
+                        }
 
-                            {/* Risky Segments (Red) */}
-                            {Array.isArray(riskySegments) && riskySegments
-                                .filter((segment: any) => Array.isArray(segment) && segment.length >= 2)
-                                .map((segment: [number, number][], index: number) => (
-                                <Polyline
-                                    key={`risky-${segment[0]?.[0]}-${segment[0]?.[1]}-${segment[segment.length - 1]?.[0]}-${segment[segment.length - 1]?.[1]}-${index}`}
-                                    coordinates={segment.map(([lat, lon]: [number, number]) => ({ latitude: lat, longitude: lon }))}
-                                    strokeColor="#ef4444"
-                                    strokeWidth={6}
-                                    zIndex={2}
-                                />
-                            ))}
-
-                            <Polyline
-                                key="route-completed"
-                                coordinates={Array.isArray(completedPolylineCoords) && completedPolylineCoords.length >= 2 ? completedPolylineCoords : DUMMY_COORDINATES_2}
-                                strokeColor="#6b7280"
-                                strokeWidth={isNavigating && Array.isArray(completedPolylineCoords) && completedPolylineCoords.length >= 2 ? 5 : 0}
-                                lineDashPattern={[5, 10]}
-                                zIndex={3}
-                            />
-
+                        return (
                             <Marker
-                                key="destination"
-                                coordinate={{
-                                    latitude: Number(safeRoute ? safeRoute.end.lat : 0),
-                                    longitude: Number(safeRoute ? safeRoute.end.lon : 0)
-                                }}
-                                title={safeRoute ? "Destination" : ""}
-                                description={safeRoute ? safeRoute.end.name : ""}
-                                opacity={safeRoute ? 1 : 0}
-                            />
-                        </>
-
-                    {/* Risk Zones Circles */}
-                    {showAnimalMarkers && Array.isArray(riskZones) && riskZones
-                        .filter((zone) => Number.isFinite(parseFloat(String(zone?.lat))) && Number.isFinite(parseFloat(String(zone?.lon))))
-                        .map((zone, index) => {
-                         const lat = parseFloat(String(zone.lat));
-                         const lon = parseFloat(String(zone.lon));
-                         return (
-                            <Circle
-                                key={`risk-circle-${zone.id || zone.scientific_name}-${index}`}
-                                center={{ latitude: lat, longitude: lon }}
-                                radius={(zone.alertRadius ?? 1.5) * 1000}
-                                strokeColor="rgba(239, 68, 68, 0.5)"
-                                fillColor="rgba(239, 68, 68, 0.1)"
-                                strokeWidth={1}
-                            />
-                        );
-                    })}
-
-                    {/* Risk Zones Markers */}
-                    {showAnimalMarkers && Array.isArray(riskZones) && riskZones
-                        .filter((zone) => Number.isFinite(parseFloat(String(zone?.lat))) && Number.isFinite(parseFloat(String(zone?.lon))))
-                        .map((zone, index) => {
-                         const lat = parseFloat(String(zone.lat));
-                         const lon = parseFloat(String(zone.lon));
-                         const animalInfo = ANIMALS[zone.scientific_name];
-                         const commonName = animalInfo?.common ?? zone.name ?? zone.scientific_name;
-                         const emoji = animalInfo?.emoji ?? zone.emoji ?? '⚠️';
-                         return (
-                            <Marker
-                                key={`risk-marker-${zone.id || zone.scientific_name}-${index}`}
-                                coordinate={{ latitude: lat, longitude: lon }}
-                                onPress={() => {
-                                    setSelectedAnimal({
-                                        name: commonName,
-                                        image_url: zone.image_url,
-                                        date: zone.eventDate,
-                                        metadata: zone.metadata || { scope: 'regional', confidence: 'medium' },
-                                        lat: lat,
-                                        lon: lon,
-                                        address: zone.address
-                                    });
-                                    setUiMode(UIMode.DETAIL);
-                                }}
-                            >
-                                <View style={styles.markerContainer}>
-                                    <Text style={styles.animalEmoji}>{emoji}</Text>
-                                </View>
-                            </Marker>
-                        );
-                    })}
-
-                    {/* Safe Places */}
-                    {(Array.isArray(processedSafePlaces) ? processedSafePlaces : [])
-                        .filter((p: any) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lon)))
-                        .map((place: any, index: number) => (
-                        <Marker
-                            key={`safeplace-${place.id || `${Number(place.lat).toFixed(6)}-${Number(place.lon).toFixed(6)}-${place.name || ''}-${index}`}`}
-                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
-                            zIndex={30}
-                        >
-                            <Text style={{ fontSize: 28 }}>
-                                {place.type === 'police' ? '👮' : '🌲'}
-                            </Text>
-                            <Callout tooltip={true}>
-                                <View style={styles.customCallout}>
-                                    <Text style={styles.calloutTitle}>{place.name}</Text>
-                                    <Text style={styles.calloutType}>{place.type === 'police' ? 'Police Station' : 'Forest Office'}</Text>
-                                    {place.contact && <Text style={styles.calloutDetail}>Contact: {place.contact}</Text>}
-                                    {place.address && <Text style={styles.calloutDetail}>Addr: {place.address}</Text>}
-                                    {place.distanceStr && <Text style={styles.calloutDetail}>Dist: {place.distanceStr}</Text>}
-                                    {place.durationStr && <Text style={styles.calloutDetail}>Time: {place.durationStr}</Text>}
-                                </View>
-                            </Callout>
-                        </Marker>
-                    ))}
-
-                    {/* Recent wildlife: near-route only when we have a route; otherwise all recent */}
-                    {showAnimalMarkers && !safeRoute && recentSightings
-                        .filter(s => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lon)))
-                        .map((sighting) => {
-                         const animalInfo = ANIMALS[sighting.scientificName];
-                         const commonName = animalInfo?.common ?? sighting.name;
-                         const emoji = animalInfo?.emoji ?? sighting.emoji ?? '🐾';
-                         const latKey = Number(sighting.lat).toFixed(6);
-                         const lonKey = Number(sighting.lon).toFixed(6);
-                         const dateKey = String(sighting.date || sighting.eventDate || '');
-                         return (
-                            <Marker
-                                key={`sighting-${sighting.id || `${sighting.scientificName}-${latKey}-${lonKey}-${dateKey}`}`}
+                                key={`sighting-${sighting.id || index}`}
                                 coordinate={{ latitude: Number(sighting.lat), longitude: Number(sighting.lon) }}
+                                zIndex={10}
                                 onPress={() => {
                                     setSelectedAnimal({
-                                        name: commonName,
+                                        name: sighting.name,
                                         scientificName: sighting.scientificName,
                                         image_url: sighting.image_url,
                                         date: sighting.date,
                                         metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' },
-                                        lat: sighting.lat,
-                                        lon: sighting.lon,
+                                        lat: Number(sighting.lat),
+                                        lon: Number(sighting.lon),
                                         address: sighting.address
                                     });
                                     setUiMode(UIMode.DETAIL);
                                 }}
                             >
                                 <View style={styles.markerContainer}>
-                                    <Text style={styles.animalEmoji}>{emoji}</Text>
+                                    <Text style={{ fontSize: isNavigating ? 24 : 30, textAlign: 'center' }}>{emoji}</Text>
                                 </View>
                             </Marker>
-                         );
+                        );
                     })}
 
-                    {/* Animal Clusters Polylines */}
-                    {showAnimalMarkers && animalClusters.map(cluster => {
-                        const pathIndex = pathIndexRef.current;
-                        if (cluster.members.length === 1) {
-                            const p = cluster.members[0];
-                            if (!Array.isArray(p.fullPath) || p.fullPath.length < 2) return null;
-                            const coords = p.fullPath
-                                .slice(0, Math.min(pathIndex + 1, p.fullPath.length))
-                                .map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))
-                                .filter(c => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-                            if (coords.length < 2) return null;
-                            return (
-                                <Polyline
-                                    key={`cluster-path-${p.id}`}
-                                    coordinates={coords}
-                                    strokeColor={p.color}
-                                    strokeWidth={4}
+                    {/* 3. SAFE PLACES (Police) */}
+                    {processedSafePlaces.map((place, index) => (
+                        <Marker
+                            key={`safe-${place.id || index}`}
+                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
+                            zIndex={40}
+                            anchor={{ x: 0.5, y: 0.5 }}
+                            title={place.name || 'Safe Place'}
+                            description={place.address || ''}
+                        >
+                            <View style={styles.safeMarker}>
+                                <Text style={styles.safeEmoji}>👮</Text>
+                            </View>
+                        </Marker>
+                    ))}
+
+                    {/* 4. USER LOCATION (Only when navigating) */}
+                    {(isNavigating && liveLocation ? [liveLocation] : []).map((loc) => (
+                        <Marker
+                            key="live-location"
+                            coordinate={{ latitude: Number(loc.lat), longitude: Number(loc.lon) }}
+                            title="Your Location"
+                            description={loc.name}
+                            zIndex={100}
+                        />
+                    ))}
+
+                    {/* 5. ELEMENTS HIDDEN DURING NAVIGATION */}
+                    {!isNavigating && (
+                        <>
+                            {/* Risk Circles (Lighter Background) */}
+                            {riskZones.map((zone, index) => (
+                                <Circle
+                                    key={`risk-circle-${zone.id || index}`}
+                                    center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
+                                    radius={2000}
+                                    fillColor="rgba(255, 0, 0, 0.15)"
+                                    strokeColor="rgba(255, 0, 0, 0.4)"
+                                    strokeWidth={1}
+                                    zIndex={5}
                                 />
-                            );
-                        }
-                        return null;
-                    })}
+                            ))}
 
-                    {/* Animal Clusters Markers */}
-                    {showAnimalMarkers && animalClusters.map(cluster => {
-                        const pathIndex = pathIndexRef.current;
-                        if (cluster.members.length > 1) {
-                            return (
+                            {/* Animal Emoji centered in red risk circles */}
+                            {riskZones.filter(z => z.lat && z.lon).map((zone, index) => {
+                                let emoji = '🐾';
+                                let commonName: string | undefined = undefined;
+                                if (zone.scientific_name) {
+                                    const sci = canonicalScientific(String(zone.scientific_name));
+                                    const entry = ANIMALS[sci];
+                                    if (entry) {
+                                        emoji = entry.emoji;
+                                        commonName = entry.common;
+                                    }
+                                }
+                                if (!commonName && zone.name) {
+                                    const entry = Object.values(ANIMALS).find(a => a.common === zone.name);
+                                    if (entry) {
+                                        emoji = entry.emoji;
+                                        commonName = entry.common;
+                                    } else {
+                                        commonName = zone.name;
+                                    }
+                                }
+                                const title = commonName || 'Animal';
+                                return (
+                                    <Marker
+                                        key={`risk-emoji-${zone.id || index}`}
+                                        coordinate={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
+                                        zIndex={12}
+                                        onPress={() => {
+                                            setSelectedAnimal({
+                                                name: title,
+                                                image_url: zone.image_url,
+                                                date: zone.eventDate,
+                                                metadata: zone.metadata || { scope: 'regional', confidence: 'medium' },
+                                                lat: Number(zone.lat),
+                                                lon: Number(zone.lon),
+                                                address: zone.address
+                                            });
+                                            setUiMode(UIMode.DETAIL);
+                                        }}
+                                    >
+                                        <View style={styles.markerContainer}>
+                                            <Text style={{ fontSize: 28, textAlign: 'center' }}>{emoji}</Text>
+                                        </View>
+                                    </Marker>
+                                );
+                            })}
+
+                            {/* Warning Markers (Offset +0.0015) */}
+                            {/* Removed ⚠️ risk markers */}
+
+                            {/* Report Markers */}
+                            {reportMarkers.map(r => {
+                                let emoji = '🐾';
+                                const name = r.wildlifeType || r.ai?.common;
+                                if (name) {
+                                     const entry = Object.values(ANIMALS).find(a => a.common === name);
+                                     if (entry) emoji = entry.emoji;
+                                }
+
+                                return (
+                                    <Marker
+                                        key={`report-${r.id}`}
+                                        coordinate={{ latitude: Number(r.lat), longitude: Number(r.lon) }}
+                                        title={name || 'Report'}
+                                        description={r.location}
+                                        zIndex={25}
+                                        onPress={() => {
+                                            setSelectedAnimal({
+                                                name: name || 'Report',
+                                                image_url: r.imageUri,
+                                                date: r.timestamp,
+                                                metadata: { scope: 'report', confidence: 'medium' },
+                                                lat: Number(r.lat),
+                                                lon: Number(r.lon),
+                                                address: r.location
+                                            });
+                                            setUiMode(UIMode.DETAIL);
+                                        }}
+                                    >
+                                        <View style={styles.markerContainer}>
+                                            <Text style={styles.emojiMarker}>{emoji}</Text>
+                                        </View>
+                                    </Marker>
+                                );
+                            })}
+
+                            {/* Predictions */}
+                            {(showPredictions ? filteredPredictions : [])
+                                .filter(p => Array.isArray(p.fullPath) && p.fullPath.length >= 2)
+                                .map(p => (
+                                    <Polyline
+                                        key={`auto-path-${p.id}`}
+                                        coordinates={p.fullPath!.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))}
+                                        strokeColor={p.color || '#F59E0B'}
+                                        strokeWidth={3}
+                                        lineDashPattern={[5, 5]}
+                                        zIndex={5}
+                                    />
+                                ))
+                            }
+
+                            {predictedPolylineCoords.length > 0 && (
+                                <Polyline
+                                    key="prediction-line"
+                                    coordinates={predictedPolylineCoords}
+                                    strokeColor={
+                                        predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
+                                        predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
+                                    }
+                                    strokeWidth={4}
+                                    lineDashPattern={[5, 5]}
+                                    zIndex={10}
+                                />
+                            )}
+
+                            {predictedPath.map((p, index) => (
                                 <Marker
-                                    key={`cluster-marker-${cluster.id}`}
-                                    coordinate={{ latitude: cluster.position[0], longitude: cluster.position[1] }}
-                                    title={`${cluster.members.length} animals`}
-                                    description={cluster.members.map(m => m.common).join(', ')}
+                                    key={`pred-point-${index}`}
+                                    coordinate={{ latitude: p.lat, longitude: p.lon }}
+                                    zIndex={15}
+                                    onPress={() => handlePointSelect(p, index)}
                                 >
-                                    <View style={styles.clusterMarker}>
-                                        <Text style={styles.clusterEmoji}>{cluster.members[0].emoji}</Text>
-                                        <Text style={styles.clusterCount}>+{cluster.members.length - 1}</Text>
+                                    <View style={[
+                                        styles.indexCircle,
+                                        {
+                                            backgroundColor: predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : '#f59e0b',
+                                            transform: [{ scale: selectedPointIndex === index ? 1.2 : 0.8 }]
+                                        }
+                                    ]}>
+                                        <Text style={styles.indexText}>{index + 1}</Text>
                                     </View>
                                 </Marker>
-                            );
-                        } else if (cluster.members.length === 1) {
-                            const p = cluster.members[0];
-                            const point = Array.isArray(p.fullPath) ? p.fullPath[pathIndex] : null;
-                            if (!Array.isArray(point) || point.length < 2) return null;
-                            return (
-                                <Marker
-                                    key={`cluster-marker-single-${p.id}`}
-                                    coordinate={{ latitude: point[0], longitude: point[1] }}
-                                    title={p.common}
-                                    description={p.current.addr}
-                                    onPress={() => handleViewDetails(p)}
-                                >
-                                    <View style={styles.markerContainer}>
-                                        <Text style={styles.animalEmoji}>{p.emoji}</Text>
-                                    </View>
-                                </Marker>
-                            );
-                        }
-                        return null;
-                    })}
+                            ))}
 
-                    </>
+                            {(Array.isArray(riskySegments) ? riskySegments : [])
+                                .filter((s: any) => Array.isArray(s) && s.length >= 2)
+                                .map((segment: [number, number][], index: number) => (
+                                    <Polyline
+                                        key={`risky-${index}`}
+                                        coordinates={segment.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
+                                        strokeColor="#ef4444"
+                                        strokeWidth={6}
+                                        zIndex={2}
+                                    />
+                                ))
+                            }
+                            
+                            {/* Live Radius (Only when NOT navigating) */}
+                            {(liveLocation && showNearbyRadius ? [liveLocation] : []).map((loc) => (
+                                <Circle
+                                    key="live-circle"
+                                    center={{ latitude: Number(loc.lat), longitude: Number(loc.lon) }}
+                                    radius={nearbyRadiusKm * 1000}
+                                    strokeColor="#f97316"
+                                    fillColor="rgba(249, 115, 22, 0.1)"
+                                    strokeWidth={1}
+                                    zIndex={2}
+                                />
+                            ))}
+                        </>
+                    )}
+
+                    {safeRoute && (
+                        <Marker
+                            key="destination"
+                            coordinate={{ latitude: Number(safeRoute.end.lat), longitude: Number(safeRoute.end.lon) }}
+                            title="Destination"
+                            description={safeRoute.end.name}
+                            zIndex={20}
+                        />
+                    )}
                 </MapView>
 
+                <SafeAreaView style={styles.headerContainer}>
+                    <View style={styles.headerContent}>
+                        <Text style={styles.headerTitle}>Wildlife Safety Map</Text>
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity style={styles.iconButton} onPress={() => setIsFilterPanelOpen(true)}>
+                                <FilterIcon width={22} height={22} color="#059669" />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.pillButton} onPress={() => setUiMode(UIMode.ROUTE_PLANNER)}>
+                                <PaperPlaneIcon width={20} height={20} color="#059669" />
+                                <Text style={styles.routeButtonText}>Route</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </SafeAreaView>
+
+                {isNavigating && (
+                    <View style={[styles.etaContainer, { bottom: insets.bottom + 20 }]}>
+                        <View style={styles.navHeaderRow}>
+                            <View>
+                                <Text style={styles.navDuration}>{formatDuration(navigationStats?.etaMinutes || safeRoute?.durationMinutes || 0)}</Text>
+                                <Text style={styles.navDistance}>{(navigationStats?.remainingKm || safeRoute?.distanceKm || 0).toFixed(1)} km remaining</Text>
+                                <Text style={styles.navEta}>Arrive by {formatArrivalTime(navigationStats?.etaMinutes || safeRoute?.durationMinutes || 0)}</Text>
+                            </View>
+                            <TouchableOpacity style={styles.endNavButton} onPress={onStopNavigation}>
+                                <Text style={styles.endNavText}>End Navigation</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                )}
+
                 <TouchableOpacity
-                    style={styles.playButton}
+                    style={[styles.gpsButton, { bottom: bottomPadding + (uiMode === UIMode.ROUTE_SUMMARY || isNavigating ? 200 : 110) }]}
                     onPress={handleCenterOnUser}
                     disabled={isCenteringOnUser || isLocationLoading}
                 >
@@ -1231,35 +927,87 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         <LocationMarkerIcon width={24} height={24} color="#374151" />
                     )}
                 </TouchableOpacity>
-
-                {isNavigating && navigationStats && (
-                    <View style={styles.navigationPanel}>
-                        <View style={styles.navigationStats}>
-                            <Text style={styles.etaText}>{formatDuration(navigationStats.etaMinutes)}</Text>
-                            <Text style={styles.distanceText}>{navigationStats.remainingKm.toFixed(1)} km remaining</Text>
+                {!isNavigating && uiMode !== UIMode.ROUTE_SUMMARY && (
+                    <View style={[styles.riskContainer, { bottom: bottomPadding + 80 }]}>
+                        <View style={styles.riskPill}>
+                            <AlertTriangleIcon width={18} height={18} color="#ef4444" />
+                            <Text style={styles.riskText}>{safeRoute && riskZones ? riskZones.length : filteredPredictions.length} Risks</Text>
+                            <View style={styles.divider} />
+                            <Text style={{ fontSize: 18 }}>👮</Text>
+                            <Text style={styles.safeText}>{safeRoute ? safePlaces.length : 0} Safe</Text>
                         </View>
-                        <TouchableOpacity style={styles.stopButton} onPress={onStopNavigation}>
-                            <StopIcon width={24} height={24} color="#ffffff" />
-                        </TouchableOpacity>
                     </View>
                 )}
-            </View>
 
-            <View style={styles.footer}>
-                <View style={styles.footerStats}>
-                    <View style={styles.statItem}>
-                        <AlertTriangleIcon width={20} height={20} color="#ef4444" />
-                        <Text style={styles.statText}>{safeRoute && riskZones ? riskZones.length : filteredPredictions.length} Risk Zones</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={{ fontSize: 16 }}>🛡️</Text>
-                        <Text style={styles.statText}>{safeRoute ? 1 : 0} Safe Routes</Text>
-                    </View>
-                </View>
-                <TouchableOpacity style={styles.planRouteButton} onPress={() => setUiMode(UIMode.ROUTE_PLANNER)}>
-                    <PaperPlaneIcon width={20} height={20} color="#059669" />
-                    <Text style={styles.planRouteText}>Plan Safe Route</Text>
-                </TouchableOpacity>
+                {!isNavigating && uiMode === UIMode.MAP && !safeRoute && (
+                    <TouchableOpacity
+                        style={[styles.planButton, { bottom: bottomPadding + 16 }]}
+                        onPress={() => setUiMode(UIMode.ROUTE_PLANNER)}
+                    >
+                        <PaperPlaneIcon width={20} height={20} color="#ffffff" />
+                        <Text style={styles.planText}>Plan Safe Route</Text>
+                    </TouchableOpacity>
+                )}
+
+                {(isNavLoading || (!isNavigating && uiMode === UIMode.ROUTE_SUMMARY && safeRoute)) && (
+                    <Animated.View
+                        style={[
+                            styles.bottomSheet,
+                            {
+                                transform: [{ translateY: bottomSheetTranslateY }],
+                                bottom: 0
+                            }
+                        ]}
+                    >
+                        <View style={styles.dragIndicator} />
+
+                        {isNavLoading && (
+                            <View style={styles.loadingContainer}>
+                                <ActivityIndicator size="large" color="#1E8E3E" />
+                                <Text style={styles.loadingText}>Preparing Safe Navigation...</Text>
+                            </View>
+                        )}
+
+                        {!isNavLoading && !isNavigating && uiMode === UIMode.ROUTE_SUMMARY && safeRoute && (
+                            <>
+                                <View style={styles.sheetHeader}>
+                                    <Text style={styles.sheetTitle}>Safe Route Found</Text>
+                                    <TouchableOpacity onPress={() => setUiMode(UIMode.MAP)}>
+                                        <XIcon width={22} height={22} color="#444" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.metricsContainer}>
+                                    <View style={styles.metricBox}>
+                                        <Text style={styles.metricValue}>{safeRoute.distanceKm.toFixed(1)}</Text>
+                                        <Text style={styles.metricLabel}>KM</Text>
+                                    </View>
+
+                                    <View style={styles.metricDivider} />
+
+                                    <View style={styles.metricBox}>
+                                        <Text style={styles.metricValue}>{formatDuration(safeRoute.durationMinutes)}</Text>
+                                        <Text style={styles.metricLabel}>DURATION</Text>
+                                    </View>
+
+                                    <View style={styles.metricDivider} />
+
+                                    <View style={styles.metricBox}>
+                                        <Text style={[styles.metricValue, { color: '#2E6CF6' }]}>
+                                            {safePlaces.length}
+                                        </Text>
+                                        <Text style={styles.metricLabel}>SAFE SPOTS</Text>
+                                    </View>
+                                </View>
+                                <Text style={styles.etaText}>ETA: Arrive by {formatArrivalTime(safeRoute.durationMinutes)}</Text>
+
+                                <TouchableOpacity style={styles.startButton} onPress={handleStartNavigation}>
+                                    <Text style={styles.startButtonText}>Start Navigation</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </Animated.View>
+                )}
             </View>
 
             {isFilterPanelOpen && (
@@ -1312,7 +1060,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
             {/* SINGLE MODAL - Android-safe architecture */}
             <Modal
-                visible={uiMode !== UIMode.MAP}
+                visible={uiMode !== UIMode.MAP && uiMode !== UIMode.ROUTE_SUMMARY}
                 transparent={true}
                 animationType="slide"
                 onRequestClose={() => setUiMode(UIMode.MAP)}
@@ -1327,45 +1075,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             if (e.stopPropagation) e.stopPropagation();
                         }}
                     >
-                        {/* Route Summary Content */}
-                        {uiMode === UIMode.ROUTE_SUMMARY && safeRoute && (
-                            <View style={styles.routeSummaryContainer}>
-                                <View style={styles.routeSummaryHeader}>
-                                    <Text style={styles.routeSummaryTitle}>Safe Route Found</Text>
-                                    <TouchableOpacity onPress={() => setUiMode(UIMode.MAP)}>
-                                        <XIcon width={24} height={24} color="#374151" />
-                                    </TouchableOpacity>
-                                </View>
-                                
-                                <View style={styles.routeSummaryStats}>
-                                    <View style={styles.routeStatGroup}>
-                                        <View style={styles.routeStat}>
-                                            <Text style={styles.routeStatValue}>{safeRoute.distanceKm.toFixed(1)}</Text>
-                                            <Text style={styles.routeStatLabel}>KM</Text>
-                                        </View>
-                                        <View style={styles.routeStat}>
-                                            <Text style={styles.routeStatValue}>{formatDuration(safeRoute.durationMinutes)}</Text>
-                                            <Text style={styles.routeStatLabel}>DURATION</Text>
-                                        </View>
-                                        <View style={styles.routeStat}>
-                                            <Text style={[styles.routeStatValue, styles.safeValue]}>{safePlaces.length}</Text>
-                                            <Text style={styles.routeStatLabel}>SAFE SPOTS</Text>
-                                        </View>
-                                    </View>
-                                </View>
-                                
-                                <TouchableOpacity
-                                    style={styles.startNavigationButton}
-                                    onPress={() => {
-                                        setUiMode(UIMode.MAP);
-                                        props.onStartNavigation();
-                                    }}
-                                >
-                                    <Text style={styles.startNavigationText}>Start Navigation</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-
                         {/* Animal Detail Content */}
                         {uiMode === UIMode.DETAIL && selectedAnimal && (
                             <View style={styles.animalDetailSheet}>
@@ -1391,20 +1100,19 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                             </View>
                                         )}
 
-                                        <View style={styles.popupMeta}>
+                        <View style={styles.popupMeta}>
                                             <Text style={styles.popupAnimalName}>{selectedAnimal.name}</Text>
 
-                                            {selectedAnimal.address && (
-                                                <View style={styles.popupMetaRow}>
-                                                    <Text style={styles.popupMetaLabel}>Address:</Text>
-                                                    <Text
-                                                        style={[styles.popupMetaValue, styles.popupMetaValueRight]}
-                                                        numberOfLines={3}
-                                                    >
-                                                        {selectedAnimal.address}
-                                                    </Text>
-                                                </View>
-                                            )}
+                    {/* FIX 3: Always show address with fallback */}
+                                            <View style={styles.popupMetaRow}>
+                                                <Text style={styles.popupMetaLabel}>Address:</Text>
+                                                <Text
+                                                    style={[styles.popupMetaValue, styles.popupMetaValueRight]}
+                                                    numberOfLines={3}
+                                                >
+                                                    {selectedAnimal.address || `${selectedAnimal.lat.toFixed(4)}, ${selectedAnimal.lon.toFixed(4)}`}
+                                                </Text>
+                                            </View>
 
                                             <View style={styles.popupMetaRow}>
                                                 <Text style={styles.popupMetaLabel}>Confidence:</Text>
@@ -1474,6 +1182,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             <RoutePlannerSheet
                                 isOpen={true}
                                 onClose={() => setUiMode(UIMode.MAP)}
+                                onSuccess={() => setUiMode(UIMode.ROUTE_SUMMARY)}
                                 onCalculateSafeRoute={onCalculateSafeRoute}
                                 routeStatus={routeStatus}
                                 routeMessage={routeMessage}
@@ -1504,6 +1213,9 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#ffffff',
     },
+    screen: {
+        flex: 1,
+    },
     noWildlifeContainer: {
         position: 'absolute',
         top: 100,
@@ -1525,36 +1237,68 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontSize: 14,
     },
-    header: {
+    headerContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        elevation: 10,
+        backgroundColor: '#ffffff',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+    },
+    headerContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#e5e7eb',
-        backgroundColor: '#ffffff',
+        paddingHorizontal: 10,
+        paddingVertical: 0,
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1f2937',
+        fontWeight: '700',
+        color: '#111827',
+        letterSpacing: -0.5,
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
     },
-    headerButton: {
-        padding: 8,
-        borderRadius: 8,
+    iconButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#ECFDF5',
+        shadowColor: '#059669',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    pillButton: {
+        height: 40,
+        paddingHorizontal: 16,
+        borderRadius: 20,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
+        backgroundColor: '#ECFDF5',
+        shadowColor: '#059669',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
     },
     routeButtonText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#374151',
+        color: '#059669',
     },
     mapContainer: {
         flex: 1,
@@ -1614,6 +1358,10 @@ const styles = StyleSheet.create({
     animalEmoji: {
         fontSize: 32,
     },
+    emojiMarker: {
+        fontSize: 28,
+        textAlign: 'center'
+    },
     markerContainer: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -1668,106 +1416,118 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         backgroundColor: '#f3f4f6', // Placeholder color while loading
     },
-    playButton: {
+    gpsButton: {
         position: 'absolute',
-        bottom: 100,
-        right: 16,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#ffffff',
+        right: 20,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 5,
-    },
-    navigationPanel: {
-        position: 'absolute',
-        bottom: 20,
-        left: 20,
-        right: 20,
-        backgroundColor: '#ffffff',
-        borderRadius: 16,
-        padding: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
+        shadowOpacity: 0.2,
         shadowRadius: 10,
         elevation: 8,
+        zIndex: 50,
     },
-    navigationStats: {
-        flex: 1,
-        paddingRight: 16,
-    },
-    etaText: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: '#1f2937',
-        letterSpacing: -0.5,
-    },
-    distanceText: {
-        fontSize: 15,
-        color: '#6b7280',
-        fontWeight: '600',
-        marginTop: 2,
-        textTransform: 'lowercase',
-    },
-    stopButton: {
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        backgroundColor: '#dc2626',
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: '#dc2626',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.4,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    footer: {
-        padding: 16,
+    etaContainer: {
+        position: 'absolute',
+        left: 20,
+        right: 20,
+        zIndex: 1000,
+        elevation: 10,
         backgroundColor: '#ffffff',
-        borderTopWidth: 1,
-        borderTopColor: '#e5e7eb',
+        borderRadius: 20,
+        padding: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
     },
-    footerStats: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
+    riskContainer: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
         alignItems: 'center',
-        marginBottom: 12,
+        zIndex: 90,
     },
-    statItem: {
+    riskPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        backgroundColor: '#ffffff',
+        paddingVertical: 10,
+        paddingHorizontal: 18,
+        borderRadius: 30,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        elevation: 6,
     },
-    statText: {
+    divider: {
+        width: 1,
+        height: 18,
+        backgroundColor: '#e5e7eb',
+        marginHorizontal: 12,
+    },
+    riskText: {
         fontSize: 14,
-        color: '#374151',
         fontWeight: '600',
+        color: '#374151',
+        marginLeft: 6,
     },
-    planRouteButton: {
+    safeText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151',
+        marginLeft: 6,
+    },
+    planButton: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        backgroundColor: '#059669',
+        paddingVertical: 18,
+        borderRadius: 28,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#ecfdf5',
-        paddingVertical: 12,
-        borderRadius: 8,
-        borderWidth: 2,
-        borderColor: '#059669',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        elevation: 10,
+        zIndex: 100,
         gap: 8,
     },
-    planRouteText: {
+    planText: {
+        color: '#ffffff',
         fontSize: 16,
-        fontWeight: 'bold',
-        color: '#059669',
+        fontWeight: '600',
+        marginLeft: 8,
+    },
+    safeMarker: {
+        width: 44,
+        height: 44,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#2E6CF6',
+        shadowColor: '#000',
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 6,
+        padding: 0,
+    },
+    safeEmoji: {
+        fontSize: 24,
+        textAlign: 'center',
+        textAlignVertical: 'center',
+        includeFontPadding: false,
     },
     modalOverlay: {
         flex: 1,
@@ -1776,26 +1536,15 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         backgroundColor: '#ffffff',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        maxHeight: '80%',
-    },
-    routeSummaryContainer: {
-        backgroundColor: '#ffffff',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        padding: 20,
-    },
-    routeSummaryHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    routeSummaryTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1f2937',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        maxHeight: '90%',
+        width: '100%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 20,
     },
     filterPanel: {
         backgroundColor: '#ffffff',
@@ -1861,58 +1610,6 @@ const styles = StyleSheet.create({
         borderColor: '#10b981',
     },
 
-    routeSummaryStats: {
-        flexDirection: 'column',
-        backgroundColor: '#f9fafb',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        gap: 16,
-    },
-    routeStatGroup: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        alignItems: 'center',
-    },
-    routeStatDivider: {
-        height: 1,
-        backgroundColor: '#e5e7eb',
-        marginHorizontal: 8,
-    },
-    routeStat: {
-        alignItems: 'center',
-        flex: 1,
-    },
-    routeStatValue: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1f2937',
-        textAlign: 'center',
-    },
-    riskValue: {
-        color: '#ef4444',
-    },
-    safeValue: {
-        color: '#2563eb',
-    },
-    routeStatLabel: {
-        fontSize: 11,
-        color: '#6b7280',
-        fontWeight: '600',
-        marginTop: 4,
-        letterSpacing: 0.5,
-    },
-    startNavigationButton: {
-        backgroundColor: '#10b981',
-        paddingVertical: 12,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    startNavigationText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#ffffff',
-    },
     routePlannerSheet: {
         flexGrow: 1,
     },
@@ -2176,5 +1873,145 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 1000,
+    },
+    bottomSheet: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingHorizontal: 20,
+        paddingTop: 16,
+        paddingBottom: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 16,
+        zIndex: 1000,
+    },
+    dragIndicator: {
+        alignSelf: 'center',
+        width: 48,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#E5E7EB',
+        marginBottom: 20,
+    },
+    loadingContainer: {
+        alignItems: 'center',
+        paddingVertical: 32,
+    },
+    loadingText: {
+        marginTop: 16,
+        fontSize: 16,
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    navigationCard: {
+        width: '100%',
+        paddingBottom: 16,
+        paddingTop: 8,
+    },
+    navHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    navDuration: {
+        fontSize: 32,
+        fontWeight: '700',
+        color: '#111827',
+        letterSpacing: -1,
+        marginBottom: 4,
+    },
+    navDistance: {
+        fontSize: 14,
+        color: '#6B7280',
+        fontWeight: '500',
+        marginTop: 0,
+        marginBottom: 4,
+    },
+    navEta: {
+        fontSize: 14, // Increased size for visibility
+        color: '#059669', // Green color to stand out
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    endNavButton: {
+        backgroundColor: '#FEE2E2',
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 24,
+    },
+    endNavText: {
+        color: '#DC2626',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    sheetHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    sheetTitle: {
+        fontSize: 22,
+        fontWeight: '600',
+        color: '#111',
+    },
+    metricsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: '#F6F7F9',
+        borderRadius: 18,
+        paddingVertical: 16,
+        paddingHorizontal: 10,
+        marginBottom: 20,
+    },
+    metricBox: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    metricValue: {
+        fontSize: 20,
+        fontWeight: '600',
+        color: '#111',
+    },
+    metricLabel: {
+        marginTop: 4,
+        fontSize: 12,
+        color: '#777',
+        letterSpacing: 1,
+    },
+    metricDivider: {
+        width: 1,
+        height: 40,
+        backgroundColor: '#E0E0E0',
+    },
+    etaText: {
+        fontSize: 14,
+        color: '#374151',
+        fontWeight: '500',
+        marginBottom: 12,
+        paddingHorizontal: 2,
+    },
+    startButton: {
+        backgroundColor: '#21A772',
+        paddingVertical: 18,
+        borderRadius: 30,
+        alignItems: 'center',
+        shadowColor: '#21A772',
+        shadowOpacity: 0.4,
+        shadowRadius: 10,
+        elevation: 8,
+    },
+    startButtonText: {
+        color: '#fff',
+        fontSize: 18,
+        fontWeight: '600',
     },
 });

@@ -4,6 +4,9 @@ import { CONFIG } from '../config';
 import { ANIMALS, canonicalScientific } from '../constants';
 import wildlifeRecent from '../wildlife_recent.json';
 
+let wildlifeAllCache: any[] | null = null;
+let wildlifeAllCacheAt = 0;
+
 // Helper to get API Base URL
 const getApiBaseUrl = (): string | null => {
     const url = CONFIG.API_BASE_URL;
@@ -392,10 +395,10 @@ export const predictMovement = async (
     kFuture: number = 3
 ): Promise<{ 
     animal: string, 
-    predicted_path: { lat: number, lon: number, address: string }[], 
+    path: { lat: number, lon: number, address: string }[], 
     risk_level: string, 
     safety_override: boolean,
-    distance_to_user_km: number,
+    distance_to_user_km?: number,
     status?: string,
     message?: string,
     degraded?: boolean
@@ -423,7 +426,7 @@ export const predictMovement = async (
         if (!response || response.error) {
             return {
                 animal,
-                predicted_path: [],
+                path: [],
                 risk_level: "Medium",
                 safety_override: false,
                 distance_to_user_km: 0,
@@ -438,7 +441,7 @@ export const predictMovement = async (
         logger.error("Failed to predict movement", error);
         return {
             animal,
-            predicted_path: [],
+            path: [],
             risk_level: "Medium",
             safety_override: false,
             distance_to_user_km: 0,
@@ -627,6 +630,15 @@ export const analyzeReportImage = async (image: { mimeType: string; data: string
         return null;
     }
 };
+
+export const deleteReport = async (reportId: string | number): Promise<{ status: string; deletedId?: string; error?: string } | null> => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) return null;
+    const id = String(reportId);
+    const url = `${baseUrl}/api/reports/${encodeURIComponent(id)}`;
+    const res = await nativeFetch(url, { method: 'DELETE' });
+    return res || null;
+};
 // --- TASK 3: Fetch Recent Wildlife from Backend ---
 export const fetchRecentWildlife = async (): Promise<any[]> => {
     const baseUrl = getApiBaseUrl();
@@ -675,11 +687,19 @@ export const fetchRecentWildlife = async (): Promise<any[]> => {
             } catch {
                 /* ignore */
             }
+            
+            // FIX: Enforce emoji from constants if backend sends warning icon or missing
+            // This prevents "⚠️" from overwriting the animal emoji
+            let emoji = record.emoji;
+            if (!emoji || emoji === '⚠️' || emoji === '?' || emoji.length > 4) {
+                emoji = animalInfo.emoji;
+            }
+
             return {
                 id: `${sci}-${record.eventDate}-${lat}`,
                 name: animalInfo.common || record.animal,
                 scientificName: sci,
-                emoji: record.emoji ?? animalInfo.emoji,
+                emoji: emoji,
                 lat,
                 lon,
                 date: record.eventDate,
@@ -739,6 +759,60 @@ export const fetchRecentWildlife = async (): Promise<any[]> => {
     }
 };
 
+export const fetchWildlifeAll = async (): Promise<any[]> => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) return [];
+
+    const now = Date.now();
+    if (wildlifeAllCache && now - wildlifeAllCacheAt < 10 * 60 * 1000) {
+        return wildlifeAllCache;
+    }
+
+    const url = `${baseUrl}/api/wildlife/all`;
+    const res = await nativeFetch(url);
+    const list: any[] = Array.isArray(res) ? res : [];
+    wildlifeAllCache = list;
+    wildlifeAllCacheAt = now;
+    return list;
+};
+
+export const fetchHistoricalPathPoints = async (
+    speciesKey: string,
+    limit = 5,
+    anchor?: { lat: number; lon: number },
+    radiusKm = 50
+): Promise<[number, number][]> => {
+    const list = await fetchWildlifeAll();
+    if (!Array.isArray(list) || list.length === 0) return [];
+
+    const key = String(speciesKey || '').trim();
+    const keyLower = key.toLowerCase();
+    const sciKey = canonicalScientific(key);
+    const commonFromSci = ANIMALS[sciKey]?.common ? String(ANIMALS[sciKey].common).toLowerCase() : '';
+
+    const filtered = list.filter((r: any) => {
+        const animal = String(r?.animal || '').trim().toLowerCase();
+        const sci = canonicalScientific(String(r?.scientific_name || ''));
+        if (sciKey && sci === sciKey) return true;
+        if (commonFromSci && animal === commonFromSci) return true;
+        if (keyLower && animal === keyLower) return true;
+        return false;
+    });
+
+    const withCoords = filtered
+        .filter((r: any) => Number.isFinite(Number(r?.lat)) && Number.isFinite(Number(r?.lon)));
+
+    const nearby = (anchor && Number.isFinite(anchor.lat) && Number.isFinite(anchor.lon))
+        ? withCoords.filter((r: any) => distKm({ lat: Number(r.lat), lon: Number(r.lon) }, { lat: anchor.lat, lon: anchor.lon }) <= radiusKm)
+        : withCoords;
+
+    const sorted = nearby.sort((a: any, b: any) => new Date(a?.eventDate || 0).getTime() - new Date(b?.eventDate || 0).getTime());
+
+    const points: [number, number][] = sorted.map((r: any) => [Number(r.lat), Number(r.lon)]);
+    if (points.length < limit) return [];
+    return points.slice(-limit);
+};
+
 export const getRoute = async (start: Location, end: Location, mode: TravelMode = 'car'): Promise<Route | null> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return null;
@@ -750,21 +824,49 @@ export const getRoute = async (start: Location, end: Location, mode: TravelMode 
     try {
         const response = await nativeFetch(url);
         
-        // Ensure response contains valid geometry before accessing coordinates
-        if (!response || !response.geometry || !response.geometry.coordinates) {
+        let path: [number, number][] = [];
+        let distanceVal = 0;
+        let durationVal = 0;
+
+        // Case 1: Standard Backend Response { geometry: { coordinates: ... }, ... }
+        if (response && response.geometry && Array.isArray(response.geometry.coordinates)) {
+            path = response.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+            distanceVal = response.distance;
+            durationVal = response.duration;
+        } 
+        // Case 2: Raw OSRM/ORS Response Structure { routes: [{ geometry: ... }] }
+        else if (response && Array.isArray(response.routes) && response.routes.length > 0) {
+            const route = response.routes[0];
+            // Handle both GeoJSON geometry and encoded polyline
+            if (route.geometry && Array.isArray(route.geometry.coordinates)) {
+                 path = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+            } else if (typeof route.geometry === 'string') {
+                // If it's a string, it might be an encoded polyline (needs decoding lib, but we don't have it here easily without install)
+                // Assuming backend handles decoding, but if we get raw OSRM with geojson:
+                logger.warn("Received string geometry in raw route, cannot decode without polyline lib");
+            }
+            distanceVal = route.distance || 0;
+            durationVal = route.duration || 0;
+        }
+        // Case 3: Data wrapped in 'data' field (Axios style, though nativeFetch returns body)
+        else if (response && response.data && Array.isArray(response.data.routes) && response.data.routes.length > 0) {
+             const route = response.data.routes[0];
+             if (route.geometry && Array.isArray(route.geometry.coordinates)) {
+                 path = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+            }
+            distanceVal = route.distance || 0;
+            durationVal = route.duration || 0;
+        }
+
+        if (path.length === 0) {
             logger.warn("Route response missing geometry", response);
             return null;
         }
-
-        const { geometry, distance, duration } = response;
-        
-        // Convert GeoJSON coordinates [lon, lat] to [lat, lon]
-        const path: [number, number][] = geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
         
         return {
             path,
-            distanceKm: distance / 1000,
-            durationMinutes: duration / 60,
+            distanceKm: distanceVal / 1000,
+            durationMinutes: durationVal / 60,
             start,
             end,
             mode

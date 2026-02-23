@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, NativeModules, Image } from 'react-native';
 import Constants from 'expo-constants';
-import { getAIGuideResponse, analyzeReportImage, searchLocations, getRoute, getAnimalsNearRoute, findSafePlacesAlongRoute, fetchRecentWildlife, findSafePlacesNear } from '../services/apiService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getAIGuideResponse, searchLocations, getRoute, getAnimalsNearRoute, findSafePlacesAlongRoute, fetchRecentWildlife, findSafePlacesNear } from '../services/apiService';
 import { ANIMALS } from '../constants';
 import type { ChatMessage } from '../types';
-import { PaperPlaneIcon, SpinnerIcon, CameraIcon, MicIcon } from './icons';
-import * as ImagePicker from 'expo-image-picker';
+import { PaperPlaneIcon, SpinnerIcon, MicIcon, ChatIcon, AlertTriangleIcon } from './icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Localization from 'expo-localization';
 
 interface GuideViewProps {
@@ -13,17 +14,16 @@ interface GuideViewProps {
 }
 
 const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
+    const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
             role: 'model',
-            text: "Hi! How are you? How can I help you today? Ask for area safety, nearby animals, safe places, or share start & destination for a safe route."
+            text: "Hi! Ask about wildlife risks near you, safe places, or planning a safe route."
         }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
-    const [isContinuous, setIsContinuous] = useState(true);
-    const [imagesToSend, setImagesToSend] = useState<{ mimeType: string; data: string }[] | null>(null);
     const [voiceAvailable, setVoiceAvailable] = useState(false);
     const scrollViewRef = useRef<ScrollView>(null);
     const [pendingOrigin, setPendingOrigin] = useState<string | null>(null);
@@ -117,7 +117,7 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
             const destOnlyMatch = lower.match(/(?:destination(?: address)?(?: is)?|go to)\s+(.+)/i);
             const originOnlyMatch = lower.match(/i(?:'| a)m (?:at|from)\s+(.+)$/i) || lower.match(/current address(?: is)?\s+(.+)$/i);
             if (isGreeting) {
-                setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Hi! How are you? How can I help you today?' }]);
+                setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: "Hi! Tell me a place name, or share your start and destination." }]);
                 produced = true;
             } else
             if (lower.includes('safe place') || lower.includes('safety place') || lower.includes('safe places') || lower.includes('safety places') || lower.includes('police') || lower.includes('forest office') || lower.includes('ranger')) {
@@ -375,31 +375,6 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                     }
                 }
             }
-            if (imagesToSend && imagesToSend.length > 0) {
-                const analysis = await analyzeReportImage(imagesToSend[0]);
-                if (analysis) {
-                    const lines: string[] = [];
-                    lines.push(`Subject: ${analysis.common || 'Unknown'} (${analysis.scientific || 'Unknown'})${typeof analysis.confidence === 'number' ? ` — confidence ${Math.round(analysis.confidence * 100)}%` : ''}`);
-                    if (analysis.circumstance) lines.push(`Circumstance: ${analysis.circumstance}`);
-                    if (analysis.behavior) lines.push(`Behavior: ${analysis.behavior}`);
-                    lines.push(`Risk: ${analysis.risk || 'Unknown'}`);
-                    if (analysis.distance_advice) lines.push(`Distance Advice: ${analysis.distance_advice}`);
-                    if (Array.isArray(analysis.actions) && analysis.actions.length > 0) {
-                        lines.push('Actions:');
-                        analysis.actions.slice(0,5).forEach(a => lines.push(`- ${a}`));
-                    }
-                    if (Array.isArray(analysis.emergency) && analysis.emergency.length > 0) {
-                        lines.push('Emergency Steps:');
-                        analysis.emergency.slice(0,4).forEach(a => lines.push(`- ${a}`));
-                    }
-                    if (analysis.summary) lines.push(`Summary: ${analysis.summary}`);
-                    const summary = lines.join('\n');
-                    contextMessages = [...contextMessages, { role: 'model', text: summary }];
-                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: summary }]);
-                    setImagesToSend(null);
-                    produced = true;
-                }
-            }
             if (!produced) {
                 const response = `Please share an area name (e.g., Ooty) to check safety and nearby safe places with recent wildlife images, or share both your current address and destination to generate a safe route with a route link.`;
                 setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: response }]);
@@ -410,100 +385,6 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                 role: 'model',
                 text: error?.message || "I'm sorry, I'm having trouble connecting right now. Please try again later."
             }]);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handlePickImage = async () => {
-        if (isLoading) return;
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) {
-            return;
-        }
-        const res = await ImagePicker.launchCameraAsync({
-            base64: true,
-            quality: 0.7
-        });
-        if (res.canceled) return;
-        const asset = res.assets?.[0];
-        if (!asset?.base64) return;
-        const mime = asset.type === 'video' ? 'video/mp4' : 'image/jpeg';
-        const dataUri = `data:${mime};base64,${asset.base64}`;
-        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__IMG__|${dataUri}|Captured Photo|` }]);
-        setIsLoading(true);
-        try {
-            const analysis = await analyzeReportImage({ mimeType: mime, data: asset.base64 });
-                if (analysis) {
-                    const lines: string[] = [];
-                    lines.push(`Subject: ${analysis.common || 'Unknown'} (${analysis.scientific || 'Unknown'})${typeof analysis.confidence === 'number' ? ` — confidence ${Math.round(analysis.confidence * 100)}%` : ''}`);
-                    if (analysis.circumstance) lines.push(`Circumstance: ${analysis.circumstance}`);
-                    if (analysis.behavior) lines.push(`Behavior: ${analysis.behavior}`);
-                    lines.push(`Risk: ${analysis.risk || 'Unknown'}`);
-                    if (analysis.distance_advice) lines.push(`Distance Advice: ${analysis.distance_advice}`);
-                    if (Array.isArray(analysis.actions) && analysis.actions.length > 0) {
-                        lines.push('Actions:');
-                        analysis.actions.slice(0,5).forEach(a => lines.push(`- ${a}`));
-                    }
-                    if (Array.isArray(analysis.emergency) && analysis.emergency.length > 0) {
-                        lines.push('Emergency Steps:');
-                        analysis.emergency.slice(0,4).forEach(a => lines.push(`- ${a}`));
-                    }
-                    if (analysis.summary) lines.push(`Summary: ${analysis.summary}`);
-                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: lines.join('\n') }]);
-                } else {
-                setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Image analysis is unavailable. Set EXPO_PUBLIC_GEMINI_API_KEY to enable.' }]);
-            }
-        } catch {
-            setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Could not analyze the photo.' }]);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleUploadImage = async () => {
-        if (isLoading) return;
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-            return;
-        }
-        const res = await ImagePicker.launchImageLibraryAsync({
-            base64: true,
-            quality: 0.7,
-            allowsEditing: true,
-            mediaTypes: ImagePicker.MediaTypeOptions.Images
-        });
-        if (res.canceled) return;
-        const asset = res.assets?.[0];
-        if (!asset?.base64) return;
-        const mime = 'image/jpeg';
-        const dataUri = `data:${mime};base64,${asset.base64}`;
-        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__IMG__|${dataUri}|Uploaded Photo|` }]);
-        setIsLoading(true);
-        try {
-            const analysis = await analyzeReportImage({ mimeType: mime, data: asset.base64 });
-            if (analysis) {
-                const lines: string[] = [];
-                lines.push(`Subject: ${analysis.common || 'Unknown'} (${analysis.scientific || 'Unknown'})${typeof analysis.confidence === 'number' ? ` — confidence ${Math.round(analysis.confidence * 100)}%` : ''}`);
-                if (analysis.circumstance) lines.push(`Circumstance: ${analysis.circumstance}`);
-                if (analysis.behavior) lines.push(`Behavior: ${analysis.behavior}`);
-                lines.push(`Risk: ${analysis.risk || 'Unknown'}`);
-                if (analysis.distance_advice) lines.push(`Distance Advice: ${analysis.distance_advice}`);
-                if (Array.isArray(analysis.actions) && analysis.actions.length > 0) {
-                    lines.push('Actions:');
-                    analysis.actions.slice(0,5).forEach(a => lines.push(`- ${a}`));
-                }
-                if (Array.isArray(analysis.emergency) && analysis.emergency.length > 0) {
-                    lines.push('Emergency Steps:');
-                    analysis.emergency.slice(0,4).forEach(a => lines.push(`- ${a}`));
-                }
-                if (analysis.summary) lines.push(`Summary: ${analysis.summary}`);
-                setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: lines.join('\n') }]);
-            } else {
-                setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Image analysis is unavailable. Set EXPO_PUBLIC_GEMINI_API_KEY to enable.' }]);
-            }
-        } catch {
-            setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Could not analyze the photo.' }]);
         } finally {
             setIsLoading(false);
         }
@@ -595,7 +476,7 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
             await ExpoSpeechRecognitionModule.start({
                 lang: Localization.locale || 'en-US',
                 interimResults: true,
-                continuous: isContinuous
+                continuous: false
             });
         } catch {
             setIsRecording(false);
@@ -604,166 +485,189 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
     };
 
     return (
-        <KeyboardAvoidingView 
-            style={styles.container} 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={90}
-        >
-            <View style={styles.header}>
-                <Text style={styles.title}>AI Wildlife Guide</Text>
-                <Text style={styles.subtitle}>Your personal safety expert</Text>
-            </View>
-            
-            <ScrollView 
-                ref={scrollViewRef}
-                style={styles.messagesContainer}
-                contentContainerStyle={styles.messagesContent}
+        <View style={styles.container}>
+            <KeyboardAvoidingView 
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
             >
-                {messages.map((msg, index) => {
-                    const isRouteLink = msg.role === 'model' && typeof msg.text === 'string' && msg.text.startsWith('__ROUTE_LINK__|');
-                    if (isRouteLink) {
-                        const parts = msg.text.split('|');
-                        const startQ = parts[1] || '';
-                        const destQ = parts[2] || '';
-                        return (
-                            <View key={index} style={[styles.messageBubble, styles.modelBubble]}>
-                                <TouchableOpacity
-                                    onPress={() => onOpenRouteLink && onOpenRouteLink(startQ, destQ)}
-                                    style={{ backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 }}
-                                >
-                                    <Text style={{ color: '#fff', fontWeight: '600' }}>
-                                        Open Route: {startQ} → {destQ}
-                                    </Text>
-                                </TouchableOpacity>
+                <View style={styles.header}>
+                    <View style={styles.headerCard}>
+                        <View style={styles.headerRow}>
+                            <View style={styles.headerIcon}>
+                                <ChatIcon width={18} height={18} color="#065f46" />
                             </View>
-                        );
-                    }
-                    const isImageCard = msg.role === 'model' && typeof msg.text === 'string' && msg.text.startsWith('__IMG__|');
-                    if (isImageCard) {
-                        const parts = msg.text.split('|');
-                        const url = parts[1] || '';
-                        const title = parts[2] || '';
-                        const caption = parts[3] || '';
-                        return (
-                            <View key={index} style={[styles.messageBubble, styles.modelBubble]}>
-                                {url ? <Image source={{ uri: url }} style={{ width: '100%', height: 180, borderRadius: 8, marginBottom: 8 }} /> : null}
-                                <Text style={[styles.modelText, { fontWeight: '600' }]}>{title}</Text>
-                                <Text style={styles.modelText}>{caption}</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.title}>AI Wildlife Guide</Text>
+                                <Text style={styles.subtitle}>Ask about risks, safe places, and routes</Text>
                             </View>
-                        );
-                    }
-                    return (
-                        <View key={index} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.modelBubble]}>
-                            <Text style={[styles.messageText, msg.role === 'user' ? styles.userText : styles.modelText]}>
-                                {msg.text}
+                        </View>
+                    </View>
+                </View>
+
+                <ScrollView 
+                    ref={scrollViewRef}
+                    style={styles.messagesContainer}
+                    contentContainerStyle={[
+                        styles.messagesContent,
+                        messages.length <= 1 && { justifyContent: 'center', flexGrow: 1 }
+                    ]}
+                    keyboardShouldPersistTaps="handled"
+                >
+                    {messages.length <= 1 && !isLoading ? (
+                        <View style={styles.emptyState}>
+                            <View style={styles.emptyIcon}>
+                                <ChatIcon width={22} height={22} color="#059669" />
+                            </View>
+                            <Text style={styles.emptyTitle}>Ask about wildlife safety near you</Text>
+                            <Text style={styles.emptyText}>
+                                Try: “Wildlife risks in Ooty” or “Plan route from Kotagiri to Coonoor”.
                             </Text>
                         </View>
-                    );
-                })}
-                {isLoading && (
-                    <View style={[styles.messageBubble, styles.modelBubble, styles.loadingBubble]}>
-                        <SpinnerIcon width={20} height={20} color="#059669" />
-                        <Text style={styles.modelText}>Thinking...</Text>
-                    </View>
-                )}
-            </ScrollView>
-
-            <View style={styles.inputContainer}>
-                <View style={styles.inputRow}>
-                    <TouchableOpacity 
-                        onPress={handlePickImage}
-                        disabled={isLoading}
-                        style={[styles.attachButton, isLoading && styles.sendButtonDisabled]}
-                    >
-                        <CameraIcon width={20} height={20} color="#374151" />
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        onPress={handleUploadImage}
-                        disabled={isLoading}
-                        style={[styles.attachButton, isLoading && styles.sendButtonDisabled]}
-                    >
-                        <Text style={{ color: '#374151', fontSize: 12 }}>Upload</Text>
-                    </TouchableOpacity>
-                    {voiceAvailable && (
-                        <TouchableOpacity 
-                            onPress={Platform.OS === 'web' ? startWebSpeech : startNativeSpeech}
-                            disabled={isLoading}
-                            style={[styles.attachButton, isLoading && styles.sendButtonDisabled]}
-                        >
-                            {isRecording ? <SpinnerIcon width={20} height={20} color="#374151" /> : <MicIcon width={20} height={20} color="#374151" />}
-                        </TouchableOpacity>
+                    ) : null}
+                    {messages.map((msg, index) => {
+                        const isRouteLink = msg.role === 'model' && typeof msg.text === 'string' && msg.text.startsWith('__ROUTE_LINK__|');
+                        if (isRouteLink) {
+                            const parts = msg.text.split('|');
+                            const startQ = parts[1] || '';
+                            const destQ = parts[2] || '';
+                            return (
+                                <View key={index} style={[styles.messageBubble, styles.modelBubble]}>
+                                    <TouchableOpacity
+                                        onPress={() => onOpenRouteLink && onOpenRouteLink(startQ, destQ)}
+                                        style={{ backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 }}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: '600' }}>
+                                            Open Route: {startQ} → {destQ}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            );
+                        }
+                        const isImageCard = msg.role === 'model' && typeof msg.text === 'string' && msg.text.startsWith('__IMG__|');
+                        if (isImageCard) {
+                            const parts = msg.text.split('|');
+                            const url = parts[1] || '';
+                            const title = parts[2] || '';
+                            const caption = parts[3] || '';
+                            return (
+                                <View key={index} style={[styles.messageBubble, styles.modelBubble]}>
+                                    {url ? <Image source={{ uri: url }} style={{ width: '100%', height: 180, borderRadius: 8, marginBottom: 8 }} /> : null}
+                                    <Text style={[styles.modelText, { fontWeight: '600' }]}>{title}</Text>
+                                    <Text style={styles.modelText}>{caption}</Text>
+                                </View>
+                            );
+                        }
+                        return (
+                            <View key={index} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.modelBubble]}>
+                                <Text style={[styles.messageText, msg.role === 'user' ? styles.userText : styles.modelText]}>
+                                    {msg.text}
+                                </Text>
+                            </View>
+                        );
+                    })}
+                    {isLoading && (
+                        <View style={[styles.messageBubble, styles.modelBubble, styles.loadingBubble]}>
+                            <SpinnerIcon width={20} height={20} color="#059669" />
+                            <Text style={styles.modelText}>Thinking...</Text>
+                        </View>
                     )}
-                    <TouchableOpacity
-                        onPress={() => setIsContinuous((prev) => !prev)}
-                        disabled={isLoading}
-                        style={[styles.attachButton, isLoading && styles.sendButtonDisabled]}
-                    >
-                        <Text style={{ color: '#374151', fontSize: 12 }}>{isContinuous ? 'Continuous' : 'Single'}</Text>
-                    </TouchableOpacity>
-                    <TextInput
-                        style={styles.input}
-                        value={input}
-                        onChangeText={setInput}
-                        placeholder="Ask about wildlife, routes, or general tips..."
-                        placeholderTextColor="#9ca3af"
-                        multiline={false}
-                        editable={!isLoading}
-                    />
-                    <TouchableOpacity 
-                        onPress={handleSend}
-                        disabled={isLoading || !input.trim()}
-                        style={[styles.sendButton, (isLoading || !input.trim()) && styles.sendButtonDisabled]}
-                    >
-                        <PaperPlaneIcon width={20} height={20} color="#ffffff" />
-                    </TouchableOpacity>
+                </ScrollView>
+
+                <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 12 }]}>
+                    <View style={styles.quickActions}>
+                        <TouchableOpacity
+                            style={[styles.quickActionButton, styles.quickActionPrimary]}
+                            disabled={isLoading}
+                            onPress={() => setInput('Plan the safest route from my current location considering recent wildlife activity.')}
+                        >
+                            <PaperPlaneIcon width={16} height={16} color="#ffffff" />
+                            <Text style={styles.quickActionPrimaryText}>Plan Safe Route</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.quickActionButton, styles.quickActionSecondary]}
+                            disabled={isLoading}
+                            onPress={() => setInput('What wildlife risks are nearby right now based on recent sightings and movement?')}
+                        >
+                            <AlertTriangleIcon width={16} height={16} color="#1B8E5A" />
+                            <Text style={styles.quickActionSecondaryText}>Check Nearby Risks</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.inputRow}>
+                        {voiceAvailable && (
+                            <TouchableOpacity 
+                                onPress={Platform.OS === 'web' ? startWebSpeech : startNativeSpeech}
+                                disabled={isLoading}
+                                style={[styles.attachButton, isLoading && styles.sendButtonDisabled]}
+                            >
+                                {isRecording ? <SpinnerIcon width={20} height={20} color="#374151" /> : <MicIcon width={20} height={20} color="#374151" />}
+                            </TouchableOpacity>
+                        )}
+                        <TextInput
+                            style={styles.input}
+                            value={input}
+                            onChangeText={setInput}
+                            placeholder="Ask about wildlife, routes, or safe places..."
+                            placeholderTextColor="#9ca3af"
+                            multiline={false}
+                            numberOfLines={1}
+                            editable={!isLoading}
+                            returnKeyType="send"
+                            onSubmitEditing={handleSend}
+                        />
+                        <TouchableOpacity 
+                            onPress={handleSend}
+                            disabled={isLoading || !input.trim()}
+                            style={[styles.sendButton, (isLoading || !input.trim()) && styles.sendButtonDisabled]}
+                        >
+                            <Ionicons name="arrow-up" size={18} color="#ffffff" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.disclaimer}>
+                        Always use multiple sources for safety decisions. Trust your instincts in the field.
+                    </Text>
                 </View>
-                <Text style={styles.disclaimer}>
-                    Always use multiple sources for safety decisions. Trust your instincts in the field.
-                </Text>
-                <View style={styles.quickActions}>
-                    <TouchableOpacity
-                        style={styles.quickActionButton}
-                        disabled={isLoading}
-                        onPress={() => setInput('Plan the safest route from my current location considering recent wildlife activity.')}
-                    >
-                        <Text style={styles.quickActionText}>Plan Safe Route</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.quickActionButton}
-                        disabled={isLoading}
-                        onPress={() => setInput('What wildlife risks are nearby right now based on recent sightings and movement?')}
-                    >
-                        <Text style={styles.quickActionText}>Check Nearby Risks</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.quickActionButton}
-                        disabled={isLoading}
-                        onPress={handlePickImage}
-                    >
-                        <Text style={styles.quickActionText}>Analyze Photo</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </KeyboardAvoidingView>
+            </KeyboardAvoidingView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#ffffff',
+        backgroundColor: '#f9fafb',
     },
     header: {
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#e5e7eb',
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 12,
         backgroundColor: '#f9fafb',
+    },
+    headerCard: {
+        backgroundColor: '#ecfdf5',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#d1fae5',
+        padding: 14,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    headerIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#d1fae5',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     title: {
         fontSize: 18,
         fontWeight: 'bold',
         color: '#111827',
-        marginBottom: 4,
     },
     subtitle: {
         fontSize: 14,
@@ -774,21 +678,31 @@ const styles = StyleSheet.create({
     },
     messagesContent: {
         padding: 16,
-        paddingBottom: 8,
+        paddingBottom: 140, // Reduced from 220 as input is no longer absolute
+        flexGrow: 1,
     },
     messageBubble: {
-        maxWidth: '80%',
-        padding: 12,
-        borderRadius: 16,
-        marginBottom: 8,
+        maxWidth: '85%',
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 20,
+        marginBottom: 12,
     },
     userBubble: {
         alignSelf: 'flex-end',
         backgroundColor: '#059669',
+        borderTopRightRadius: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     modelBubble: {
         alignSelf: 'flex-start',
-        backgroundColor: '#f3f4f6',
+        backgroundColor: '#f3f4f6', // Softer grey instead of white with border
+        borderTopLeftRadius: 4,
+        borderWidth: 0, // Removed border for cleaner look
     },
     loadingBubble: {
         flexDirection: 'row',
@@ -797,7 +711,7 @@ const styles = StyleSheet.create({
     },
     messageText: {
         fontSize: 14,
-        lineHeight: 20,
+        lineHeight: 22,
     },
     userText: {
         color: '#ffffff',
@@ -805,68 +719,133 @@ const styles = StyleSheet.create({
     modelText: {
         color: '#111827',
     },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        marginBottom: 16,
+        // Removed border and background for cleaner UI
+    },
+    emptyIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#f3f4f6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 8,
+    },
+    emptyTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1f2937',
+        marginBottom: 4,
+        textAlign: 'center',
+    },
+    emptyText: {
+        fontSize: 12,
+        color: '#6b7280',
+        textAlign: 'center',
+        lineHeight: 18,
+    },
     inputContainer: {
-        padding: 16,
-        backgroundColor: '#ffffff',
-        borderTopWidth: 1,
-        borderTopColor: '#e5e7eb',
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        backgroundColor: '#f9fafb', // Added background color
     },
     inputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
+        marginTop: 20, // Increased spacing
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 30,
+        backgroundColor: '#ffffff',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 }, // Reduced shadow
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
     attachButton: {
-        padding: 10,
-        backgroundColor: '#e5e7eb',
+        width: 40, // Reduced size
+        height: 40,
+        backgroundColor: '#f3f4f6',
         borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     input: {
         flex: 1,
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
         paddingVertical: 10,
         fontSize: 14,
-        color: '#374151',
-        backgroundColor: '#f3f4f6',
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 20,
+        color: '#111827',
+        // Removed fixed width/height constraints implicitly
     },
     sendButton: {
-        padding: 12,
-        backgroundColor: '#059669',
+        width: 40, // Reduced size
+        height: 40,
+        backgroundColor: '#1B8E5A',
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
     sendButtonDisabled: {
         backgroundColor: '#9ca3af',
     },
     disclaimer: {
-        fontSize: 12,
+        fontSize: 11,
         textAlign: 'center',
         color: '#9ca3af',
-        marginTop: 8,
-        paddingHorizontal: 16,
+        marginTop: 14, // Increased spacing
+        marginBottom: 8,
+        paddingHorizontal: 20, // Added horizontal padding
     },
     quickActions: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        gap: 8,
-        marginTop: 8
+        gap: 12,
+        marginTop: 0,
+        marginVertical: 20, // Added vertical margin
     },
     quickActionButton: {
         flex: 1,
-        backgroundColor: '#e5e7eb',
-        paddingVertical: 8,
-        paddingHorizontal: 10,
-        borderRadius: 10,
-        alignItems: 'center'
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        borderWidth: 1,
     },
-    quickActionText: {
-        color: '#111827',
-        fontSize: 12,
-        fontWeight: '600'
+    quickActionPrimary: {
+        backgroundColor: '#1B8E5A',
+        borderColor: '#1B8E5A',
+    },
+    quickActionSecondary: {
+        backgroundColor: '#ffffff',
+        borderColor: '#e5e7eb', // Softer border
+    },
+    quickActionPrimaryText: {
+        color: '#ffffff',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    quickActionSecondaryText: {
+        color: '#1f2937', // Dark text for secondary
+        fontSize: 14,
+        fontWeight: '600',
     },
 });
 

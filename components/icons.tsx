@@ -155,6 +155,12 @@ export const EditIcon: React.FC<IconProps> = ({ width = defaultSize, height = de
   </Svg>
 );
 
+export const TrashIcon: React.FC<IconProps> = ({ width = defaultSize, height = defaultSize, color = defaultColor }) => (
+  <Svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.5}>
+    <Path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M10 11v6m4-6v6M9 7l1-2h4l1 2m-8 0l1 14h8l1-14" />
+  </Svg>
+);
+
 export const StopIcon: React.FC<IconProps> = ({ width = defaultSize, height = defaultSize, color = defaultColor }) => (
   <Svg width={width} height={height} viewBox="0 0 24 24" fill={color}>
     <Path fillRule="evenodd" d="M4.5 7.5a3 3 0 013-3h9a3 3 0 013 3v9a3 3 0 01-3-3h-9a3 3 0 01-3-3v-9z" clipRule="evenodd" />

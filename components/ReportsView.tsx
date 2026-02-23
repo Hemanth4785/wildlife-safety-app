@@ -2,18 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } from 'react-native';
 import * as Location from 'expo-location';
 import type { Report } from '../types';
-import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon } from './icons';
+import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon, TrashIcon } from './icons';
 import * as ImagePicker from 'expo-image-picker';
-import { reverseGeocode, analyzeReportImage, searchLocations } from '../services/apiService';
+import { reverseGeocode, analyzeReportImage, searchLocations, deleteReport as deleteReportApi } from '../services/apiService';
+import { auth } from '../services/firebase';
+import { useAppContext } from '../contexts/AppContext';
 
 const WILDLIFE_TYPES = ["Sloth Bear", "Tiger", "Leopard", "Asian Elephant", "Gaur", "Bison"];
 
 interface ReportsViewProps {
-    reports: Report[];
     onAddReport: (report: Omit<Report, 'id' | 'timestamp'>) => Promise<void>;
 }
 
-const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
+const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
+    const { reports, removeReport } = useAppContext();
     const [activeTab, setActiveTab] = useState<'submit' | 'recent'>('submit');
     const [wildlifeType, setWildlifeType] = useState('');
     const [location, setLocation] = useState('');
@@ -23,7 +25,57 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
     const [imageData, setImageData] = useState<string | undefined>(undefined);
     const [filterType, setFilterType] = useState<string>('All');
     const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
-    const [highlightId, setHighlightId] = useState<number | null>(null);
+
+    const getAnimalLabel = (r: Report) => String((r as any).animal || r.wildlifeType || r.ai?.common || 'Unknown');
+    const getCreatedAtDate = (r: Report): Date | null => {
+        const createdAt = (r as any).createdAt;
+        if (createdAt && typeof createdAt.toDate === 'function') return createdAt.toDate();
+        const raw = (typeof (r as any).created_at === 'string' ? (r as any).created_at : r.timestamp);
+        if (typeof raw === 'string') {
+            const d = new Date(raw);
+            return Number.isFinite(d.getTime()) ? d : null;
+        }
+        return null;
+    };
+
+    const isOwner = (r: Report) => {
+        const uid = auth.currentUser?.uid;
+        const ownerId = (r as any).userId;
+        return Boolean(uid && ownerId && ownerId === uid);
+    };
+
+    const handleDeleteReport = (reportId: string | number) => {
+        Alert.alert(
+            'Delete report?',
+            'Are you sure you want to delete this report?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            const res = await deleteReportApi(reportId);
+                            if (res && res.status === 'success') {
+                                const deletedId = res.deletedId || String(reportId);
+                                await removeReport(deletedId);
+                                return;
+                            }
+                            Alert.alert('Error', 'Could not delete the report.');
+                        } catch {
+                            Alert.alert('Error', 'Could not delete the report.');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const displayedReports = reports
+        .filter(r => {
+            if (filterType === 'All') return true;
+            return getAnimalLabel(r) === filterType;
+        });
     
     useEffect(() => {
         let mounted = true;
@@ -35,18 +87,13 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                     setActiveTab('recent');
                 }
                 await storage.removeItem('reports.defaultTab');
-                const hid = await storage.getItem<number>('reports.highlightId');
-                if (mounted && typeof hid === 'number') {
-                    setHighlightId(hid);
-                }
-                await storage.removeItem('reports.highlightId');
             } catch {
                 // ignore
             }
         })();
         return () => { mounted = false; };
     }, []);
-    
+
     const handleUseCurrentLocation = async () => {
         try {
             setLocation("Fetching location...");
@@ -89,19 +136,24 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                 Alert.alert("Permission required", "Please grant photo library access.");
                 return;
             }
+            const mediaTypes = (ImagePicker as any).MediaType
+                ? [(ImagePicker as any).MediaType.Images]
+                : (ImagePicker as any).MediaTypeOptions?.Images;
             const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                mediaTypes,
                 allowsEditing: true,
                 quality: 0.7,
                 base64: true
             });
-            if (!result.canceled && result.assets && result.assets.length > 0) {
-                const a = result.assets[0];
-                setImageUri(a.uri);
-                setImageData(a.base64 ?? undefined);
+            const canceled = (result as any).canceled ?? (result as any).cancelled ?? false;
+            const assets = (result as any).assets ?? ((result as any).uri ? [{ uri: (result as any).uri, base64: (result as any).base64 }] : []);
+            if (!canceled && Array.isArray(assets) && assets.length > 0) {
+                const a = assets[0];
+                if (a?.uri) setImageUri(a.uri);
+                setImageData(a?.base64 ?? undefined);
             }
-        } catch {
-            Alert.alert("Error", "Could not open photo picker.");
+        } catch (e: any) {
+            Alert.alert("Error", e?.message ? String(e.message) : "Could not open photo picker.");
         }
     };
     const handleCaptureImage = async () => {
@@ -116,13 +168,15 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                 quality: 0.7,
                 base64: true
             });
-            if (!result.canceled && result.assets && result.assets.length > 0) {
-                const a = result.assets[0];
-                setImageUri(a.uri);
-                setImageData(a.base64 ?? undefined);
+            const canceled = (result as any).canceled ?? (result as any).cancelled ?? false;
+            const assets = (result as any).assets ?? ((result as any).uri ? [{ uri: (result as any).uri, base64: (result as any).base64 }] : []);
+            if (!canceled && Array.isArray(assets) && assets.length > 0) {
+                const a = assets[0];
+                if (a?.uri) setImageUri(a.uri);
+                setImageData(a?.base64 ?? undefined);
             }
-        } catch {
-            Alert.alert("Error", "Could not open camera.");
+        } catch (e: any) {
+            Alert.alert("Error", e?.message ? String(e.message) : "Could not open camera.");
         }
     };
 
@@ -306,41 +360,54 @@ const ReportsView: React.FC<ReportsViewProps> = ({ reports, onAddReport }) => {
                                 </TouchableOpacity>
                             ))}
                         </View>
-                        {reports.length > 0 ? reports
-                            .filter(r => filterType === 'All' ? true : r.wildlifeType === filterType)
-                            .map(report => (
-                            <View key={report.id} style={[styles.reportItem, highlightId === report.id ? { borderColor: '#059669' } : null]}>
-                                <View style={styles.reportHeader}>
-                                    <Text style={styles.reportType}>{report.wildlifeType}</Text>
-                                    <Text style={styles.reportDate}>
-                                        {new Date(report.timestamp).toLocaleString()}
+                        {displayedReports.length > 0 ? displayedReports.map((report) => {
+                            const animalLabel = getAnimalLabel(report);
+                            const createdAt = getCreatedAtDate(report);
+                            const dateText = createdAt ? createdAt.toLocaleString() : '';
+                            return (
+                                <View key={String(report.id)} style={styles.reportItem}>
+                                    <View style={styles.reportHeader}>
+                                        <View style={styles.animalTag}>
+                                            <Text style={styles.animalTagText}>{animalLabel}</Text>
+                                        </View>
+                                        <View style={styles.headerRight}>
+                                            {isOwner(report) ? (
+                                                <TouchableOpacity onPress={() => handleDeleteReport(report.id)} style={styles.deleteButton}>
+                                                    <TrashIcon width={18} height={18} color="#ef4444" />
+                                                </TouchableOpacity>
+                                            ) : null}
+                                            <Text style={styles.reportDate}>{dateText}</Text>
+                                        </View>
+                                    </View>
+                                    <Text style={styles.reportMeta}>
+                                        Reported by: {(report as any).userEmail || 'Unknown'}
                                     </Text>
+                                    <Text style={styles.reportLocation}>
+                                        <Text style={styles.reportLabel}>Location: </Text>
+                                        {report.location || ''}
+                                    </Text>
+                                    <Text style={styles.reportDescription}>{report.description || ''}</Text>
+                                    {(report as any).ai ? (
+                                        <View style={styles.aiBox}>
+                                            <Text style={styles.aiTitle}>
+                                                Identified: {(report as any).ai.common || 'Unknown'}{(report as any).ai.scientific ? ` (${(report as any).ai.scientific})` : ''}
+                                            </Text>
+                                            {(report as any).ai.summary ? (
+                                                <Text style={styles.aiText}>{(report as any).ai.summary}</Text>
+                                            ) : null}
+                                            {(report as any).ai.risk ? (
+                                                <Text style={styles.aiMeta}>Risk: {(report as any).ai.risk}</Text>
+                                            ) : null}
+                                        </View>
+                                    ) : null}
+                                    {report.imageUri ? (
+                                        <View style={{ marginTop: 10 }}>
+                                            <Image source={{ uri: report.imageUri }} style={{ width: '100%', height: 160, borderRadius: 12 }} />
+                                        </View>
+                                    ) : null}
                                 </View>
-                                <Text style={styles.reportLocation}>
-                                    <Text style={styles.reportLabel}>Location: </Text>
-                                    {report.location}
-                                </Text>
-                                <Text style={styles.reportDescription}>{report.description}</Text>
-                                {report.ai ? (
-                                    <View style={{ marginTop: 8, backgroundColor: '#f3f4f6', padding: 8, borderRadius: 6 }}>
-                                        <Text style={{ fontWeight: '600', color: '#111827' }}>
-                                            Identified: {report.ai.common || 'Unknown'}{report.ai.scientific ? ` (${report.ai.scientific})` : ''}
-                                        </Text>
-                                        {report.ai.summary ? (
-                                            <Text style={{ color: '#374151', marginTop: 4 }}>{report.ai.summary}</Text>
-                                        ) : null}
-                                        {report.ai.risk ? (
-                                            <Text style={{ color: '#6b7280', marginTop: 4 }}>Risk: {report.ai.risk}</Text>
-                                        ) : null}
-                                    </View>
-                                ) : null}
-                                {report.imageUri ? (
-                                    <View style={{ marginTop: 8 }}>
-                                        <Image source={{ uri: report.imageUri }} style={{ width: '100%', height: 160, borderRadius: 8 }} />
-                                    </View>
-                                ) : null}
-                            </View>
-                        )) : (
+                            );
+                        }) : (
                             <View style={styles.emptyState}>
                                 <Text style={styles.emptyStateText}>No recent reports submitted.</Text>
                             </View>
@@ -521,9 +588,14 @@ const styles = StyleSheet.create({
     reportItem: {
         backgroundColor: '#ffffff',
         padding: 16,
-        borderRadius: 8,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: '#e5e7eb',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 3,
     },
     reportHeader: {
         flexDirection: 'row',
@@ -531,14 +603,41 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         marginBottom: 8,
     },
-    reportType: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#111827',
+    headerRight: {
+        alignItems: 'flex-end',
+        gap: 6,
+    },
+    deleteButton: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: '#fef2f2',
+        borderWidth: 1,
+        borderColor: '#fee2e2',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    animalTag: {
+        backgroundColor: '#ecfdf5',
+        borderWidth: 1,
+        borderColor: '#d1fae5',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+    },
+    animalTagText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#065f46',
     },
     reportDate: {
         fontSize: 12,
         color: '#6b7280',
+    },
+    reportMeta: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginBottom: 6,
     },
     reportLocation: {
         fontSize: 14,
@@ -553,8 +652,27 @@ const styles = StyleSheet.create({
         color: '#111827',
         marginTop: 8,
         backgroundColor: '#f9fafb',
-        padding: 8,
-        borderRadius: 4,
+        padding: 10,
+        borderRadius: 12,
+    },
+    aiBox: {
+        marginTop: 10,
+        backgroundColor: '#f3f4f6',
+        padding: 10,
+        borderRadius: 12,
+    },
+    aiTitle: {
+        fontWeight: '700',
+        color: '#111827',
+    },
+    aiText: {
+        color: '#374151',
+        marginTop: 4,
+        lineHeight: 18,
+    },
+    aiMeta: {
+        color: '#6b7280',
+        marginTop: 4,
     },
     emptyState: {
         paddingVertical: 40,

@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 // The single source of truth for the API URL
-const DEFAULT_API_URL = "http://192.168.0.105:3000";
+const DEFAULT_API_URL = "http://10.211.106.199:3000";
 
 const getExtra = (key: string, envKey?: string, fallback: string = ""): string => {
     const expoExtra = Constants.expoConfig?.extra;
@@ -11,28 +12,38 @@ const getExtra = (key: string, envKey?: string, fallback: string = ""): string =
 };
 
 export const getApiBaseUrl = (): string => {
-    // 1. Try from Expo Config (app.config.js / app.json) - Preferred way in Expo
     const expoExtra = Constants.expoConfig?.extra;
-    const configUrl = expoExtra?.API_BASE_URL;
-
-    // 2. Try from Environment Variable (if available in process.env)
     const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+    const configUrl = expoExtra?.API_BASE_URL;
+    const configNative = expoExtra?.API_BASE_URL_NATIVE || configUrl;
+    const configWeb = expoExtra?.API_BASE_URL_WEB || configUrl;
 
-    // 3. Fallback
-    // Ensure this NEVER points to 192.168.1.7
-    let url = configUrl || envUrl || DEFAULT_API_URL;
+    let url = DEFAULT_API_URL;
 
-    // Web-specific fallback if URL is still missing (unlikely given the default above)
-    if (!url && typeof window !== 'undefined') {
-        const hostname = window.location.hostname;
-        url = `http://${hostname}:3000`;
+    if (Platform?.OS === 'web') {
+        url = (configWeb || envUrl || DEFAULT_API_URL);
+        if (!url && typeof window !== 'undefined') {
+            const hostname = window.location.hostname;
+            url = `http://${hostname}:3000`;
+        }
+    } else {
+        // Prefer env for native to avoid localhost
+        url = (envUrl || configNative || DEFAULT_API_URL);
+        // Android emulator special-case
+        if (Platform.OS === 'android') {
+            if (url.includes('localhost') || url.includes('127.0.0.1')) {
+                url = 'http://10.0.2.2:3000';
+            }
+        }
+        // General native safety: avoid localhost
+        if (url.includes('localhost') || url.includes('127.0.0.1')) {
+            url = DEFAULT_API_URL;
+        }
     }
 
-    // Strip trailing slash if present
     if (url.endsWith('/')) {
         url = url.slice(0, -1);
     }
-
     return url;
 };
 

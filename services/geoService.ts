@@ -172,6 +172,14 @@ export const formatDuration = (durationInMinutes: number): string => {
     return `${hours} hr ${minutes} min`;
 };
 
+// Helper to calculate estimated arrival time
+export const formatArrivalTime = (durationInMinutes: number): string => {
+    const now = new Date();
+    const arrivalTime = new Date(now.getTime() + durationInMinutes * 60000);
+    
+    return arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 // Helper to calculate minimum distance from a point to a polyline (simplified to closest vertex)
 export const calculateMinDistanceToPolyline = (point: {lat: number, lon: number}, polyline: [number, number][]): number => {
     let minDistance = Infinity;

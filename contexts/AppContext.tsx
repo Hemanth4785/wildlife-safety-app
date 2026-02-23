@@ -8,7 +8,7 @@ import { storage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import { NEARBY_KM } from '../constants';
 import * as authService from '../services/authService';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { auth } from '../services/firebase';
 
@@ -31,6 +31,7 @@ interface AppContextValue extends AppState {
   
   // Report actions
   addReport: (report: Omit<Report, 'id' | 'timestamp'>) => Promise<void>;
+  removeReport: (reportId: string | number) => Promise<void>;
   
   // Session management
   initializeApp: () => Promise<void>;
@@ -76,6 +77,41 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   useEffect(() => {
     initializeApp();
   }, [initializeApp]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      const next: Report[] = snap.docs.map((d) => {
+        const data: any = d.data() || {};
+        const createdAt = data.createdAt;
+        const createdAtDate = createdAt && typeof createdAt.toDate === 'function' ? createdAt.toDate() : null;
+        const createdAtIso = createdAtDate ? createdAtDate.toISOString() : (typeof data.created_at === 'string' ? data.created_at : '');
+        const timestamp = createdAtIso || (typeof data.created_at === 'string' ? data.created_at : new Date().toISOString());
+        return {
+          id: d.id,
+          wildlifeType: String(data.wildlifeType || data.animal || ''),
+          location: String(data.location || ''),
+          description: String(data.description || ''),
+          timestamp,
+          imageUri: typeof data.imageUri === 'string' ? data.imageUri : undefined,
+          lat: Number.isFinite(Number(data.lat)) ? Number(data.lat) : undefined,
+          lon: Number.isFinite(Number(data.lon)) ? Number(data.lon) : undefined,
+          userId: typeof data.userId === 'string' ? data.userId : undefined,
+          userEmail: typeof data.userEmail === 'string' ? data.userEmail : undefined,
+          ai: data.ai || undefined,
+          createdAt: createdAt || undefined,
+          created_at: typeof data.created_at === 'string' ? data.created_at : undefined,
+        };
+      });
+      setReports(next);
+      storage.setItem('reports', next);
+    }, () => {
+      setReports([]);
+      storage.setItem('reports', []);
+    });
+    return () => unsub();
+  }, [user?.uid]);
 
   // Auth state listener
   useEffect(() => {
@@ -148,22 +184,36 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Add report
   const addReport = useCallback(async (report: Omit<Report, 'id' | 'timestamp'>) => {
     try {
+      const uid = auth.currentUser?.uid || '';
+      const email = auth.currentUser?.email || '';
       const newReport: Report = {
         ...report,
         id: Date.now(),
         timestamp: new Date().toISOString(),
+        userId: uid || undefined,
+        userEmail: email || undefined,
       };
       
-      const updatedReports = [newReport, ...reports];
-      setReports(updatedReports);
-      await storage.setItem('reports', updatedReports);
+      setReports((prev) => {
+        const updatedReports = [newReport, ...prev];
+        storage.setItem('reports', updatedReports);
+        return updatedReports;
+      });
       
       try {
-        const uid = auth.currentUser?.uid;
         const data = {
-          ...newReport,
-          userId: uid || null,
-          created_at: new Date().toISOString()
+          animal: (newReport as any).wildlifeType || (newReport as any).animal || '',
+          lat: Number((newReport as any).lat),
+          lon: Number((newReport as any).lon),
+          description: String((newReport as any).description || ''),
+          createdAt: serverTimestamp(),
+          userId: uid,
+          userEmail: email,
+          wildlifeType: (newReport as any).wildlifeType || '',
+          location: (newReport as any).location || '',
+          imageUri: (newReport as any).imageUri || null,
+          ai: (newReport as any).ai || null,
+          created_at: newReport.timestamp
         };
         await setDoc(doc(db, 'reports', String(newReport.id)), data, { merge: true });
       } catch (e) {
@@ -173,7 +223,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       logger.error('Add report error', error);
       throw error;
     }
-  }, [reports]);
+  }, []);
+
+  const removeReport = useCallback(async (reportId: string | number) => {
+    const deletedId = String(reportId);
+    setReports((prev) => {
+      const next = prev.filter((r) => String(r.id) !== deletedId);
+      storage.setItem('reports', next);
+      return next;
+    });
+  }, []);
 
   const value: AppContextValue = {
     user,
@@ -188,6 +247,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     setIsLoading,
     closeOnboarding,
     addReport,
+    removeReport,
     initializeApp,
   };
 

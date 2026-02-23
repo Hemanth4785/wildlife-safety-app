@@ -30,7 +30,7 @@ export default {
       favicon: "./assets/favicon.png"
     },
     extra: {
-      API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.0.105:3000",
+      API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL || "http://10.211.106.199:3000",
       OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "",
       OPENAI_MODEL: process.env.EXPO_PUBLIC_OPENAI_MODEL || "gpt-3.5-turbo",
       GEMINI_API_KEY: process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "",

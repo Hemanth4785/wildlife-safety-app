@@ -7,6 +7,9 @@ import wildlifeRecent from '../wildlife_recent.json';
 import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
 
+let wildlifeAllCache: any[] | null = null;
+let wildlifeAllCacheAt = 0;
+
 const distKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
     const R = 6371;
     const dLat = ((b.lat - a.lat) * Math.PI) / 180;
@@ -673,6 +676,77 @@ export const fetchRecentWildlife = async (): Promise<any[]> => {
             return [];
         }
     }
+};
+
+export const deleteReport = async (reportId: string | number): Promise<{ status: string; deletedId?: string; error?: string } | null> => {
+    const baseUrl = getApiBaseUrl();
+    const id = String(reportId);
+    const url = `${baseUrl}/api/reports/${encodeURIComponent(id)}`;
+    try {
+        const response = await fetch(url, { method: 'DELETE' });
+        if (!response.ok) return { status: 'failed', error: 'Delete failed' };
+        return await response.json();
+    } catch {
+        return { status: 'failed', error: 'Network error' };
+    }
+};
+
+export const fetchWildlifeAll = async (): Promise<any[]> => {
+    const baseUrl = getApiBaseUrl();
+    const now = Date.now();
+    if (wildlifeAllCache && now - wildlifeAllCacheAt < 10 * 60 * 1000) {
+        return wildlifeAllCache;
+    }
+
+    const url = `${baseUrl}/api/wildlife/all`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return [];
+        const data = await response.json();
+        const list: any[] = Array.isArray(data) ? data : [];
+        wildlifeAllCache = list;
+        wildlifeAllCacheAt = now;
+        return list;
+    } catch {
+        return [];
+    }
+};
+
+export const fetchHistoricalPathPoints = async (
+    speciesKey: string,
+    limit = 5,
+    anchor?: { lat: number; lon: number },
+    radiusKm = 50
+): Promise<[number, number][]> => {
+    const list = await fetchWildlifeAll();
+    if (!Array.isArray(list) || list.length === 0) return [];
+
+    const key = String(speciesKey || '').trim();
+    const keyLower = key.toLowerCase();
+    const sciKey = canonicalScientific(key);
+    const commonFromSci = ANIMALS[sciKey]?.common ? String(ANIMALS[sciKey].common).toLowerCase() : '';
+
+    const filtered = list.filter((r: any) => {
+        const animal = String(r?.animal || '').trim().toLowerCase();
+        const sci = canonicalScientific(String(r?.scientific_name || ''));
+        if (sciKey && sci === sciKey) return true;
+        if (commonFromSci && animal === commonFromSci) return true;
+        if (keyLower && animal === keyLower) return true;
+        return false;
+    });
+
+    const withCoords = filtered
+        .filter((r: any) => Number.isFinite(Number(r?.lat)) && Number.isFinite(Number(r?.lon)));
+
+    const nearby = (anchor && Number.isFinite(anchor.lat) && Number.isFinite(anchor.lon))
+        ? withCoords.filter((r: any) => distKm({ lat: Number(r.lat), lon: Number(r.lon) }, { lat: anchor.lat, lon: anchor.lon }) <= radiusKm)
+        : withCoords;
+
+    const sorted = nearby.sort((a: any, b: any) => new Date(a?.eventDate || 0).getTime() - new Date(b?.eventDate || 0).getTime());
+
+    const points: [number, number][] = sorted.map((r: any) => [Number(r.lat), Number(r.lon)]);
+    if (points.length < limit) return [];
+    return points.slice(-limit);
 };
 
 /** Uses OSRM (getRoute) only. No /api/safe-route; no straight-line fallback. */

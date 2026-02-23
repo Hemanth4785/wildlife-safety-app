@@ -106,61 +106,67 @@ const AppContent: React.FC = () => {
     
     if (showOnboarding) return <OnboardingGuide onClose={closeOnboarding} />;
 
-    const renderView = () => {
-        switch (currentView) {
-            case View.HOME:
-                return <Dashboard 
-                            user={user}
-                            status={status}
-                            message={message}
-                            predictions={predictions}
-                            nearbyRadiusKm={nearbyRadius}
-                            safeRoute={safeRoute}
-                            weather={weather}
-                            recentSightings={recentSightings}
-                            onNavigate={handleNavigate}
-                        />;
-            case View.MAP:
-                return <MapView 
-                        status={status} message={message} userLocation={userLocation} predictions={predictions} safeRoute={safeRoute}
-                        safePlaces={safePlaces} riskZones={riskZones} riskySegments={riskySegments}
-                        onLocationSubmit={processLocationSearch} suggestions={suggestions} isSuggesting={isSuggesting}
-                        onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} routeStatus={routeStatus}
-                        routeMessage={routeMessage} onCalculateSafeRoute={calculateSafeRoute} getCurrentLocation={getCurrentLocation}
-                        isNavigating={isNavigating} liveLocation={liveLocation} navigationStats={navigationStats}
-                        onStartNavigation={handleStartNavigation} onStopNavigation={stopNavigation} navigationAlert={navigationAlert}
-                        clearNavigationAlert={clearNavigationAlert} closestPathIndex={closestPathIndex}
-                        animationProgress={animationProgress} isPlaying={isPlaying}
-                        onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}
-                        nearbyRadiusKm={nearbyRadius}
-                        isApproachingStart={isApproachingStart}
-                        recentSightings={recentSightings}
-                        isWildlifeLoading={isWildlifeLoading}
-                        isLocationLoading={isLocationLoading}
-                        isRouteLoading={isRouteLoading}
-                        reports={reports}
-                        initialRouteStart={routeIntent?.start}
-                        initialRouteEnd={routeIntent?.end}
-                    />;
-            case View.GUIDE: return <GuideView onOpenRouteLink={(startQuery, destQuery) => {
-                        setRouteIntent({ start: startQuery, end: destQuery });
-                        setCurrentView(View.MAP);
-                    }} />;
-            case View.REPORTS: return <ReportsView reports={reports} onAddReport={addReport} />;
-            case View.PROFILE: return <ProfileView user={user} onLogout={handleLogout} onUpdateUser={updateUser} onNavigate={setCurrentView} />;
-            default: return <Dashboard 
-                                user={user} status={status} message={message} predictions={predictions} 
-                                nearbyRadiusKm={nearbyRadius} safeRoute={safeRoute} weather={weather}
-                                recentSightings={recentSightings}
-                                onNavigate={handleNavigate}
-                            />;
-        }
-    };
+    const viewStyle = (active: boolean) => [
+        StyleSheet.absoluteFill,
+        { opacity: active ? 1 : 0 }
+    ];
+    const viewPointerEvents = (active: boolean): 'auto' | 'none' => (active ? 'auto' : 'none');
 
     return (
         <SafeAreaView style={styles.container}>
            <RNView style={styles.main}>
-             {renderView()}
+             <RNView style={viewStyle(currentView === View.HOME)} pointerEvents={viewPointerEvents(currentView === View.HOME)}>
+                 <Dashboard
+                     user={user}
+                     status={status}
+                     message={message}
+                     predictions={predictions}
+                     nearbyRadiusKm={nearbyRadius}
+                     safeRoute={safeRoute}
+                     weather={weather}
+                     recentSightings={recentSightings}
+                     onNavigate={handleNavigate}
+                 />
+             </RNView>
+
+             <RNView style={viewStyle(currentView === View.MAP)} pointerEvents={viewPointerEvents(currentView === View.MAP)}>
+                 <MapView
+                     status={status} message={message} userLocation={userLocation} predictions={predictions} safeRoute={safeRoute}
+                     safePlaces={safePlaces} riskZones={riskZones} riskySegments={riskySegments}
+                     onLocationSubmit={processLocationSearch} suggestions={suggestions} isSuggesting={isSuggesting}
+                     onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} routeStatus={routeStatus}
+                     routeMessage={routeMessage} onCalculateSafeRoute={calculateSafeRoute} getCurrentLocation={getCurrentLocation}
+                     isNavigating={isNavigating} liveLocation={liveLocation} navigationStats={navigationStats}
+                     onStartNavigation={handleStartNavigation} onStopNavigation={stopNavigation} navigationAlert={navigationAlert}
+                     clearNavigationAlert={clearNavigationAlert} closestPathIndex={closestPathIndex}
+                     animationProgress={animationProgress} isPlaying={isPlaying}
+                     onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}
+                     nearbyRadiusKm={nearbyRadius}
+                     isApproachingStart={isApproachingStart}
+                     recentSightings={recentSightings}
+                     isWildlifeLoading={isWildlifeLoading}
+                     isLocationLoading={isLocationLoading}
+                     isRouteLoading={isRouteLoading}
+                     reports={reports}
+                     initialRouteStart={routeIntent?.start}
+                     initialRouteEnd={routeIntent?.end}
+                 />
+             </RNView>
+
+             <RNView style={viewStyle(currentView === View.GUIDE)} pointerEvents={viewPointerEvents(currentView === View.GUIDE)}>
+                 <GuideView onOpenRouteLink={(startQuery, destQuery) => {
+                     setRouteIntent({ start: startQuery, end: destQuery });
+                     setCurrentView(View.MAP);
+                 }} />
+             </RNView>
+
+             <RNView style={viewStyle(currentView === View.REPORTS)} pointerEvents={viewPointerEvents(currentView === View.REPORTS)}>
+                 <ReportsView onAddReport={addReport} />
+             </RNView>
+
+             <RNView style={viewStyle(currentView === View.PROFILE)} pointerEvents={viewPointerEvents(currentView === View.PROFILE)}>
+                 <ProfileView user={user} onLogout={handleLogout} onUpdateUser={updateUser} onNavigate={setCurrentView} />
+             </RNView>
            </RNView>
            <BottomNav currentView={currentView} onNavigate={setCurrentView} />
         </SafeAreaView>

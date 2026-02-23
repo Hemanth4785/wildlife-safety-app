@@ -95,7 +95,7 @@ export enum UIMode {
 }
 
 export interface Report {
-    id: number;
+    id: string | number;
     wildlifeType: string;
     location: string;
     description: string;
@@ -103,6 +103,10 @@ export interface Report {
     imageUri?: string;
     lat?: number;
     lon?: number;
+    userId?: string;
+    userEmail?: string;
+    createdAt?: any;
+    created_at?: string;
     ai?: {
         common?: string;
         scientific?: string;

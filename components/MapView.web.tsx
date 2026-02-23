@@ -8,7 +8,7 @@ import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon,
 import AnimalDetailModal from './AnimalDetailModal';
 import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
-import { formatDistance, formatDuration, calculateMinDistanceToPolyline } from '../services/geoService';
+import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistanceToPolyline } from '../services/geoService';
 
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
@@ -329,6 +329,7 @@ const NavigationInfoPanel: React.FC<NavigationInfoPanelProps> = ({ stats, onStop
                 <div className="text-left flex-grow">
                     <p className="text-3xl font-bold text-gray-800">{stats.etaMinutes}<span className="text-xl font-medium"> min</span></p>
                     <p className="text-gray-500 font-semibold">{stats.remainingKm} km remaining</p>
+                    <p className="text-sm text-gray-600 font-semibold">Arrives at {formatArrivalTime(stats.etaMinutes)}</p>
                 </div>
                 <button onClick={onStop} className="bg-red-600 text-white rounded-full p-4 hover:bg-red-700 transition-colors shadow-lg flex-shrink-0">
                     <StopIcon className="w-6 h-6" />
@@ -678,6 +679,7 @@ const RouteSummaryPanel: React.FC<RouteSummaryPanelProps> = ({ route, safePlaces
                 <p className="text-xs text-gray-500">SAFE SPOTS</p>
             </div>
         </div>
+        <p className="text-sm text-gray-600 mb-2 px-2">ETA: Arrives at {formatArrivalTime(route.durationMinutes)}</p>
         <p className="text-sm text-gray-600 mb-4 px-2">This route passes near {riskZones.length} potential wildlife risk zones and {safePlaces.length} designated safe places.</p>
         <button onClick={onStartNavigation} className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-lg shadow hover:bg-emerald-700 flex items-center justify-center gap-2">
             Start Navigation
