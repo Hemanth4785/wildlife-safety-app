@@ -291,6 +291,16 @@ interface MapViewProps {
     reports?: Report[];
     initialRouteStart?: string;
     initialRouteEnd?: string;
+    
+    // Filters from context
+    visibleAnimals: Record<string, boolean>;
+    setVisibleAnimals: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
+    showPredictions: boolean;
+    setShowPredictions: (val: boolean) => void;
+    showNearbyRadius: boolean;
+    setShowNearbyRadius: (val: boolean) => void;
+    showAnimalMarkers: boolean;
+    setShowAnimalMarkers: (val: boolean) => void;
 }
 
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
@@ -315,7 +325,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
         isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation,
         recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading,
-        reports = []
+        reports = [],
+        visibleAnimals, setVisibleAnimals,
+        showPredictions, setShowPredictions,
+        showNearbyRadius, setShowNearbyRadius,
+        showAnimalMarkers, setShowAnimalMarkers
     } = props;
     
     const mapRef = useRef<MapView>(null);
@@ -335,9 +349,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [detailModalAnimal, setDetailModalAnimal] = useState<AnimalPrediction | null>(null);
     const pathIndexRef = useRef(0);
     const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
-    const [visibleAnimals, setVisibleAnimals] = useLocalStorage<Record<string, boolean>>('map-filter-animals', {});
-    const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', false);
-    const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
+    
     const [showWeatherOverlay, setShowWeatherOverlay] = useLocalStorage<boolean>('map-filter-weather', false);
     const [mapRegion, setMapRegion] = useState<{ latitudeDelta: number; longitudeDelta: number } | null>(null);
     const [isCenteringOnUser, setIsCenteringOnUser] = useState(false);
@@ -355,8 +367,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         latitudeDelta: 0.0922,
         longitudeDelta: 0.0421,
     };
-
-    const [showAnimalMarkers, setShowAnimalMarkers] = useState(true);
 
     // Enforce stable initial state for arrays
     const [uiMode, setUiMode] = useState<UIMode>(UIMode.MAP);
@@ -390,7 +400,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Stable derived state
     const filteredPredictions = useMemo(() => {
         if (!Array.isArray(predictions)) return [];
-        return predictions.filter(p => visibleAnimals[p.common] !== false);
+        return predictions.filter(p => visibleAnimals[p.scientific] !== false);
     }, [predictions, visibleAnimals]);
 
     // ... (keep existing methods)
@@ -474,6 +484,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }
     }, [safeRoute, onStartNavigation]);
 
+    const handleStopNavigation = useCallback(() => {
+        setShowAnimalMarkers(false);
+        onStopNavigation();
+    }, [onStopNavigation]);
+
     const handlePredictMovement = useCallback(async () => {
         if (!selectedAnimal) return;
         setPredictionLoading(true);
@@ -539,37 +554,55 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     }, [predictedPath]);
 
     const safeRoutePolylineCoords = useMemo(() => {
-        if (!safeRoute?.path) return [];
-        return safeRoute.path.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
+        if (!safeRoute?.path || !Array.isArray(safeRoute.path)) return [];
+        // Requirement: Convert [lat, lon] -> { latitude, longitude }
+        const coords = safeRoute.path.map(([lat, lon]) => ({ 
+            latitude: Number(lat), 
+            longitude: Number(lon) 
+        }));
+        // Requirement: Log route coordinates length
+        console.log(`[Route] Full route polyline rendering with ${coords.length} coordinates.`);
+        return coords;
     }, [safeRoute]);
 
     const remainingPolylineCoords = useMemo(() => {
-        if (!safeRoute?.path || !isNavigating) return [];
-        return safeRoute.path.slice(closestPathIndex).map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
+        if (!safeRoute?.path || !isNavigating || !Array.isArray(safeRoute.path)) return [];
+        const coords = safeRoute.path.slice(closestPathIndex).map(([lat, lon]) => ({ 
+            latitude: Number(lat), 
+            longitude: Number(lon) 
+        }));
+        console.log(`[Route] Remaining route polyline rendering with ${coords.length} coordinates.`);
+        return coords;
     }, [safeRoute, isNavigating, closestPathIndex]);
 
     const completedPolylineCoords = useMemo(() => {
-        if (!safeRoute?.path || !isNavigating) return [];
-        return safeRoute.path.slice(0, closestPathIndex + 1).map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
+        if (!safeRoute?.path || !isNavigating || !Array.isArray(safeRoute.path)) return [];
+        const coords = safeRoute.path.slice(0, closestPathIndex + 1).map(([lat, lon]) => ({ 
+            latitude: Number(lat), 
+            longitude: Number(lon) 
+        }));
+        console.log(`[Route] Completed route polyline rendering with ${coords.length} coordinates.`);
+        return coords;
     }, [safeRoute, isNavigating, closestPathIndex]);
 
     // Flatten data for markers to ensure stable keys and no undefined access
     const reportMarkers = useMemo(() => (Array.isArray(reports) ? reports : []).filter(r => r.lat && r.lon), [reports]);
-    // FIX 1: Filter animals by route proximity when navigating
+    
+    // FIX: Filter animals by visibility toggle AND species filter (using scientific name)
     const animalMarkers = useMemo(() => {
-        const base = (showAnimalMarkers && recentSightings ? recentSightings : []).filter(s => s.lat && s.lon);
-        
-        if (isNavigating && safeRoute?.path) {
-            return base.filter(s => {
-                const dist = calculateMinDistanceToPolyline({ lat: Number(s.lat), lon: Number(s.lon) }, safeRoute.path);
-                return dist <= 5; // 5km threshold
-            });
-        }
-        return base;
-    }, [showAnimalMarkers, recentSightings, isNavigating, safeRoute]);
+        if (!showAnimalMarkers || !recentSightings) return [];
+        return recentSightings.filter(s => 
+            s.lat && 
+            s.lon && 
+            visibleAnimals[s.scientificName] !== false
+        );
+    }, [showAnimalMarkers, recentSightings, visibleAnimals]);
     
     // 🔎 STEP 1 – LOG RAW DATA
-    console.log("ANIMALS BEFORE RENDER:", animalMarkers.map(a => ({ id: a.id, emoji: a.emoji, name: a.name })));
+    console.log(`[MapView] Animals visible: ${animalMarkers.length} (showMarkers: ${showAnimalMarkers}, sightings: ${recentSightings?.length})`);
+    if (riskZones && riskZones.length > 0) {
+        console.log(`[MapView] Rendering ${riskZones.length} risk zones on route.`);
+    }
 
     // FIX: Offset risk markers so they appear next to the animal
     // Removed riskZoneMarkers to eliminate ⚠️ icons from map
@@ -582,20 +615,34 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     provider={PROVIDER_GOOGLE}
                     style={StyleSheet.absoluteFillObject}
                     initialRegion={initialRegion}
-                    showsUserLocation={!isNavigating && !!userLocation}
+                    showsUserLocation={true}
+                    followsUserLocation={isNavigating}
                     showsMyLocationButton={false}
                     onRegionChangeComplete={(region: Region) =>
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
                     }
                 >
-                    {/* 1. ROUTE POLYLINES (Always bottom layer) */}
+                    {/* 1. RISK CIRCLES (Bottom Layer) */}
+                    {showAnimalMarkers && riskZones.map((zone, index) => (
+                        <Circle
+                            key={`risk-circle-${zone.id || index}-${index}`}
+                            center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
+                            radius={2000}
+                            fillColor="rgba(255, 0, 0, 0.12)"
+                            strokeColor="rgba(255, 0, 0, 0.3)"
+                            strokeWidth={1}
+                            zIndex={1}
+                        />
+                    ))}
+
+                    {/* 2. ROUTE POLYLINES */}
                     {safeRoutePolylineCoords.length > 0 && (
                         <Polyline
                             key="route-full"
                             coordinates={safeRoutePolylineCoords}
                             strokeColor="#16a34a"
-                            strokeWidth={!isNavigating ? 5 : 0}
-                            zIndex={1}
+                            strokeWidth={!isNavigating ? 4 : 0}
+                            zIndex={2}
                             lineCap="round"
                             lineJoin="round"
                         />
@@ -605,8 +652,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             key="route-remaining"
                             coordinates={remainingPolylineCoords}
                             strokeColor="#16a34a"
-                            strokeWidth={isNavigating ? 5 : 0}
-                            zIndex={1}
+                            strokeWidth={isNavigating ? 4 : 0}
+                            zIndex={2}
                             lineCap="round"
                             lineJoin="round"
                         />
@@ -616,39 +663,45 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             key="route-completed"
                             coordinates={completedPolylineCoords}
                             strokeColor="#6b7280"
-                            strokeWidth={isNavigating ? 5 : 0}
+                            strokeWidth={isNavigating ? 4 : 0}
                             lineDashPattern={[5, 10]}
-                            zIndex={1}
+                            zIndex={2}
                             lineCap="round"
                             lineJoin="round"
                         />
                     )}
 
-                    {/* 2. ANIMAL MARKERS (Filtered if navigating) */}
+                    {/* 3. SAFE PLACES (Modern Badge) */}
+                    {processedSafePlaces.map((place, index) => (
+                        <Marker
+                            key={`safe-${place.id || index}-${index}`}
+                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
+                            zIndex={3}
+                            anchor={{ x: 0.5, y: 0.5 }}
+                            title={place.name || 'Safe Place'}
+                            description={place.address || ''}
+                        >
+                            <View style={styles.safeBadge}>
+                                <Text style={{ fontSize: 20 }}>{place.type === 'police' ? '👮' : '🛡️'}</Text>
+                            </View>
+                        </Marker>
+                    ))}
+
+                    {/* 4. ANIMAL & RISK MARKERS */}
                     {animalMarkers.map((sighting, index) => {
-                        // 1. Normalize emoji field (handle typo in backend data)
                         let emoji = sighting.emoji || sighting.emojji;
-
-                        // 2. Try to lookup if missing
                         if (!emoji && sighting.scientificName) {
-                            const entry = ANIMALS[sighting.scientificName];
+                            const sci = canonicalScientific(String(sighting.scientificName));
+                            const entry = ANIMALS[sci];
                             if (entry) emoji = entry.emoji;
                         }
-                        if (!emoji && sighting.name) {
-                            const entry = Object.values(ANIMALS).find(a => a.common === sighting.name);
-                            if (entry) emoji = entry.emoji;
-                        }
-
-                        // 3. Safety Check: Only render if we have valid coordinates AND an emoji
-                        if (!emoji || !sighting.lat || !sighting.lon) {
-                            return null;
-                        }
+                        if (!emoji || !sighting.lat || !sighting.lon) return null;
 
                         return (
                             <Marker
                                 key={`sighting-${sighting.id || index}`}
                                 coordinate={{ latitude: Number(sighting.lat), longitude: Number(sighting.lon) }}
-                                zIndex={10}
+                                zIndex={4}
                                 onPress={() => {
                                     setSelectedAnimal({
                                         name: sighting.name,
@@ -670,115 +723,113 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         );
                     })}
 
-                    {/* 3. SAFE PLACES (Police) */}
-                    {processedSafePlaces.map((place, index) => (
+                    {showAnimalMarkers && riskZones.filter(z => z.lat && z.lon).map((zone, index) => {
+                        let emoji = '🐾';
+                        let commonName: string | undefined = undefined;
+                        if (zone.scientific_name) {
+                            const sci = canonicalScientific(String(zone.scientific_name));
+                            const entry = ANIMALS[sci];
+                            if (entry) {
+                                emoji = entry.emoji;
+                                commonName = entry.common;
+                            }
+                        }
+                        if (!commonName && zone.name) {
+                            const entry = Object.values(ANIMALS).find(a => a.common === zone.name);
+                            if (entry) {
+                                emoji = entry.emoji;
+                                commonName = entry.common;
+                            } else {
+                                commonName = zone.name;
+                            }
+                        }
+                        return (
+                            <Marker
+                                key={`risk-emoji-${zone.id || index}-${index}`}
+                                coordinate={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
+                                zIndex={4}
+                                onPress={() => {
+                                    setSelectedAnimal({
+                                        name: commonName || 'Animal',
+                                        image_url: zone.image_url,
+                                        date: zone.eventDate,
+                                        metadata: zone.metadata || { scope: 'regional', confidence: 'medium' },
+                                        lat: Number(zone.lat),
+                                        lon: Number(zone.lon),
+                                        address: zone.address
+                                    });
+                                    setUiMode(UIMode.DETAIL);
+                                }}
+                            >
+                                <View style={styles.markerContainer}>
+                                    <Text style={{ fontSize: 28, textAlign: 'center' }}>{emoji}</Text>
+                                </View>
+                            </Marker>
+                        );
+                    })}
+
+                    {/* 5. DESTINATION PIN (ONLY) */}
+                    {safeRoute && (
                         <Marker
-                            key={`safe-${place.id || index}`}
-                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
-                            zIndex={40}
-                            anchor={{ x: 0.5, y: 0.5 }}
-                            title={place.name || 'Safe Place'}
-                            description={place.address || ''}
+                            key="route-destination"
+                            coordinate={{ latitude: Number(safeRoute.end.lat), longitude: Number(safeRoute.end.lon) }}
+                            title="Destination"
+                            description={safeRoute.end.name}
+                            pinColor="#ef4444"
+                            zIndex={5}
+                        />
+                    )}
+
+                    {/* 6. ADDITIONAL OVERLAYS (Predictions, Reports, etc.) */}
+                    {uiMode === UIMode.PREDICTION && predictedPolylineCoords.length > 0 && (
+                        <Polyline
+                            key="prediction-line"
+                            coordinates={predictedPolylineCoords}
+                            strokeColor={
+                                predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
+                                predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
+                            }
+                            strokeWidth={4}
+                            lineDashPattern={[5, 5]}
+                            zIndex={6}
+                        />
+                    )}
+
+                    {uiMode === UIMode.PREDICTION && predictedPath.map((p, index) => (
+                        <Marker
+                            key={`pred-point-${index}`}
+                            coordinate={{ latitude: p.lat, longitude: p.lon }}
+                            zIndex={7}
+                            onPress={() => handlePointSelect(p, index)}
                         >
-                            <View style={styles.safeMarker}>
-                                <Text style={styles.safeEmoji}>👮</Text>
+                            <View style={[
+                                styles.indexCircle,
+                                {
+                                    backgroundColor: predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : '#f59e0b',
+                                    transform: [{ scale: selectedPointIndex === index ? 1.2 : 0.8 }]
+                                }
+                            ]}>
+                                <Text style={styles.indexText}>{index + 1}</Text>
                             </View>
                         </Marker>
                     ))}
 
-                    {/* 4. USER LOCATION (Only when navigating) */}
-                    {(isNavigating && liveLocation ? [liveLocation] : []).map((loc) => (
-                        <Marker
-                            key="live-location"
-                            coordinate={{ latitude: Number(loc.lat), longitude: Number(loc.lon) }}
-                            title="Your Location"
-                            description={loc.name}
-                            zIndex={100}
-                        />
-                    ))}
-
-                    {/* 5. ELEMENTS HIDDEN DURING NAVIGATION */}
                     {!isNavigating && (
                         <>
-                            {/* Risk Circles (Lighter Background) */}
-                            {riskZones.map((zone, index) => (
-                                <Circle
-                                    key={`risk-circle-${zone.id || index}`}
-                                    center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
-                                    radius={2000}
-                                    fillColor="rgba(255, 0, 0, 0.15)"
-                                    strokeColor="rgba(255, 0, 0, 0.4)"
-                                    strokeWidth={1}
-                                    zIndex={5}
-                                />
-                            ))}
-
-                            {/* Animal Emoji centered in red risk circles */}
-                            {riskZones.filter(z => z.lat && z.lon).map((zone, index) => {
-                                let emoji = '🐾';
-                                let commonName: string | undefined = undefined;
-                                if (zone.scientific_name) {
-                                    const sci = canonicalScientific(String(zone.scientific_name));
-                                    const entry = ANIMALS[sci];
-                                    if (entry) {
-                                        emoji = entry.emoji;
-                                        commonName = entry.common;
-                                    }
-                                }
-                                if (!commonName && zone.name) {
-                                    const entry = Object.values(ANIMALS).find(a => a.common === zone.name);
-                                    if (entry) {
-                                        emoji = entry.emoji;
-                                        commonName = entry.common;
-                                    } else {
-                                        commonName = zone.name;
-                                    }
-                                }
-                                const title = commonName || 'Animal';
-                                return (
-                                    <Marker
-                                        key={`risk-emoji-${zone.id || index}`}
-                                        coordinate={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
-                                        zIndex={12}
-                                        onPress={() => {
-                                            setSelectedAnimal({
-                                                name: title,
-                                                image_url: zone.image_url,
-                                                date: zone.eventDate,
-                                                metadata: zone.metadata || { scope: 'regional', confidence: 'medium' },
-                                                lat: Number(zone.lat),
-                                                lon: Number(zone.lon),
-                                                address: zone.address
-                                            });
-                                            setUiMode(UIMode.DETAIL);
-                                        }}
-                                    >
-                                        <View style={styles.markerContainer}>
-                                            <Text style={{ fontSize: 28, textAlign: 'center' }}>{emoji}</Text>
-                                        </View>
-                                    </Marker>
-                                );
-                            })}
-
-                            {/* Warning Markers (Offset +0.0015) */}
-                            {/* Removed ⚠️ risk markers */}
-
-                            {/* Report Markers */}
-                            {reportMarkers.map(r => {
+                            {showAnimalMarkers && reportMarkers.map(r => {
                                 let emoji = '🐾';
                                 const name = r.wildlifeType || r.ai?.common;
                                 if (name) {
                                      const entry = Object.values(ANIMALS).find(a => a.common === name);
                                      if (entry) emoji = entry.emoji;
                                 }
-
                                 return (
                                     <Marker
                                         key={`report-${r.id}`}
                                         coordinate={{ latitude: Number(r.lat), longitude: Number(r.lon) }}
                                         title={name || 'Report'}
                                         description={r.location}
-                                        zIndex={25}
+                                        zIndex={8}
                                         onPress={() => {
                                             setSelectedAnimal({
                                                 name: name || 'Report',
@@ -799,7 +850,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 );
                             })}
 
-                            {/* Predictions */}
                             {(showPredictions ? filteredPredictions : [])
                                 .filter(p => Array.isArray(p.fullPath) && p.fullPath.length >= 2)
                                 .map(p => (
@@ -809,43 +859,10 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                         strokeColor={p.color || '#F59E0B'}
                                         strokeWidth={3}
                                         lineDashPattern={[5, 5]}
-                                        zIndex={5}
+                                        zIndex={9}
                                     />
                                 ))
                             }
-
-                            {predictedPolylineCoords.length > 0 && (
-                                <Polyline
-                                    key="prediction-line"
-                                    coordinates={predictedPolylineCoords}
-                                    strokeColor={
-                                        predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : 
-                                        predictionRisk?.toLowerCase() === 'medium' ? '#f59e0b' : '#10b981'
-                                    }
-                                    strokeWidth={4}
-                                    lineDashPattern={[5, 5]}
-                                    zIndex={10}
-                                />
-                            )}
-
-                            {predictedPath.map((p, index) => (
-                                <Marker
-                                    key={`pred-point-${index}`}
-                                    coordinate={{ latitude: p.lat, longitude: p.lon }}
-                                    zIndex={15}
-                                    onPress={() => handlePointSelect(p, index)}
-                                >
-                                    <View style={[
-                                        styles.indexCircle,
-                                        {
-                                            backgroundColor: predictionRisk?.toLowerCase() === 'high' ? '#ef4444' : '#f59e0b',
-                                            transform: [{ scale: selectedPointIndex === index ? 1.2 : 0.8 }]
-                                        }
-                                    ]}>
-                                        <Text style={styles.indexText}>{index + 1}</Text>
-                                    </View>
-                                </Marker>
-                            ))}
 
                             {(Array.isArray(riskySegments) ? riskySegments : [])
                                 .filter((s: any) => Array.isArray(s) && s.length >= 2)
@@ -855,12 +872,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                         coordinates={segment.map(([lat, lon]) => ({ latitude: lat, longitude: lon }))}
                                         strokeColor="#ef4444"
                                         strokeWidth={6}
-                                        zIndex={2}
+                                        zIndex={10}
                                     />
                                 ))
                             }
                             
-                            {/* Live Radius (Only when NOT navigating) */}
                             {(liveLocation && showNearbyRadius ? [liveLocation] : []).map((loc) => (
                                 <Circle
                                     key="live-circle"
@@ -869,20 +885,10 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                     strokeColor="#f97316"
                                     fillColor="rgba(249, 115, 22, 0.1)"
                                     strokeWidth={1}
-                                    zIndex={2}
+                                    zIndex={11}
                                 />
                             ))}
                         </>
-                    )}
-
-                    {safeRoute && (
-                        <Marker
-                            key="destination"
-                            coordinate={{ latitude: Number(safeRoute.end.lat), longitude: Number(safeRoute.end.lon) }}
-                            title="Destination"
-                            description={safeRoute.end.name}
-                            zIndex={20}
-                        />
                     )}
                 </MapView>
 
@@ -909,11 +915,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 <Text style={styles.navDistance}>{(navigationStats?.remainingKm || safeRoute?.distanceKm || 0).toFixed(1)} km remaining</Text>
                                 <Text style={styles.navEta}>Arrive by {formatArrivalTime(navigationStats?.etaMinutes || safeRoute?.durationMinutes || 0)}</Text>
                             </View>
-                            <TouchableOpacity style={styles.endNavButton} onPress={onStopNavigation}>
+                            <TouchableOpacity style={styles.endNavButton} onPress={handleStopNavigation}>
                                 <Text style={styles.endNavText}>End Navigation</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
+                )}
+
+                {!showAnimalMarkers && !isNavigating && uiMode === UIMode.MAP && (
+                    <TouchableOpacity 
+                        style={styles.hiddenMarkersIndicator}
+                        onPress={() => setShowAnimalMarkers(true)}
+                    >
+                        <AlertTriangleIcon width={16} height={16} color="#059669" />
+                        <Text style={styles.hiddenMarkersText}>Wildlife Markers Hidden (Tap to show)</Text>
+                    </TouchableOpacity>
                 )}
 
                 <TouchableOpacity
@@ -933,7 +949,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             <AlertTriangleIcon width={18} height={18} color="#ef4444" />
                             <Text style={styles.riskText}>{safeRoute && riskZones ? riskZones.length : filteredPredictions.length} Risks</Text>
                             <View style={styles.divider} />
-                            <Text style={{ fontSize: 18 }}>👮</Text>
+                            <Text style={{ fontSize: 18 }}>👮‍♂️</Text>
                             <Text style={styles.safeText}>{safeRoute ? safePlaces.length : 0} Safe</Text>
                         </View>
                     </View>
@@ -1022,6 +1038,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                             </View>
                             <ScrollView style={styles.filterContent}>
                                 <View style={styles.filterRow}>
+                                    <Text style={styles.filterLabel}>Wildlife Markers</Text>
+                                    <TouchableOpacity
+                                        style={[styles.toggle, showAnimalMarkers && styles.toggleActive]}
+                                        onPress={() => setShowAnimalMarkers(!showAnimalMarkers)}
+                                    />
+                                </View>
+                                <View style={styles.filterRow}>
                                     <Text style={styles.filterLabel}>AI Predictions</Text>
                                     <TouchableOpacity
                                         style={[styles.toggle, showPredictions && styles.toggleActive]}
@@ -1043,12 +1066,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                     />
                                 </View>
                                 <Text style={styles.animalsLabel}>Visible Animals</Text>
-                                {animalTypes.map(animalName => (
-                                    <View key={animalName} style={styles.filterRow}>
-                                        <Text style={styles.filterLabel}>{animalName}</Text>
+                                {animalTypes.map(scientificName => (
+                                    <View key={scientificName} style={styles.filterRow}>
+                                        <Text style={styles.filterLabel}>{ANIMALS[scientificName]?.common || scientificName}</Text>
                                         <TouchableOpacity
-                                            style={[styles.checkbox, visibleAnimals[animalName] && styles.checkboxChecked]}
-                                            onPress={() => handleToggleAnimal(animalName)}
+                                            style={[styles.checkbox, visibleAnimals[scientificName] !== false && styles.checkboxChecked]}
+                                            onPress={() => handleToggleAnimal(scientificName)}
                                         />
                                     </View>
                                 ))}
@@ -1508,20 +1531,14 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginLeft: 8,
     },
-    safeMarker: {
-        width: 44,
-        height: 44,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1.5,
-        borderColor: '#2E6CF6',
+    safeBadge: {
+        backgroundColor: '#DCFCE7',
+        padding: 6,
+        borderRadius: 20,
         shadowColor: '#000',
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 6,
-        padding: 0,
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     safeEmoji: {
         fontSize: 24,
@@ -2013,5 +2030,30 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         fontWeight: '600',
+    },
+    hiddenMarkersIndicator: {
+        position: 'absolute',
+        top: 60,
+        alignSelf: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 25,
+        flexDirection: 'row',
+        alignItems: 'center',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        zIndex: 100,
+        borderWidth: 1,
+        borderColor: '#059669',
+    },
+    hiddenMarkersText: {
+        color: '#059669',
+        fontWeight: '700',
+        marginLeft: 8,
+        fontSize: 14,
     },
 });

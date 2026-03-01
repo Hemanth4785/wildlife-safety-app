@@ -35,10 +35,9 @@ const AppContent: React.FC = () => {
         setUser,
         setIsLoading,
         closeOnboarding, 
-        addReport 
-    } = useAppContext();
+        addReport,
 
-    const { 
+        // From Context (Animal Data)
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
         suggestions, isSuggesting, fetchSuggestions, clearSuggestions,
@@ -47,9 +46,15 @@ const AppContent: React.FC = () => {
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,
         backendReady, backendError,
-        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
-    } = useAnimalData(!!user);
-    
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading,
+
+        // Filters from Context
+        visibleAnimals, setVisibleAnimals,
+        showPredictions, setShowPredictions,
+        showNearbyRadius, setShowNearbyRadius,
+        showAnimalMarkers, setShowAnimalMarkers
+    } = useAppContext();
+
     const [currentView, setCurrentView] = useState(View.HOME);
     const [routeIntent, setRouteIntent] = useState<{ start: string; end: string } | null>(null);
     const [authScreen, setAuthScreen] = useState<'login' | 'signup'>('login');
@@ -126,6 +131,7 @@ const AppContent: React.FC = () => {
                      weather={weather}
                      recentSightings={recentSightings}
                      onNavigate={handleNavigate}
+                     visibleAnimals={visibleAnimals}
                  />
              </RNView>
 
@@ -137,7 +143,7 @@ const AppContent: React.FC = () => {
                      onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} routeStatus={routeStatus}
                      routeMessage={routeMessage} onCalculateSafeRoute={calculateSafeRoute} getCurrentLocation={getCurrentLocation}
                      isNavigating={isNavigating} liveLocation={liveLocation} navigationStats={navigationStats}
-                     onStartNavigation={handleStartNavigation} onStopNavigation={stopNavigation} navigationAlert={navigationAlert}
+                     onStopNavigation={stopNavigation} navigationAlert={navigationAlert}
                      clearNavigationAlert={clearNavigationAlert} closestPathIndex={closestPathIndex}
                      animationProgress={animationProgress} isPlaying={isPlaying}
                      onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}
@@ -150,6 +156,15 @@ const AppContent: React.FC = () => {
                      reports={reports}
                      initialRouteStart={routeIntent?.start}
                      initialRouteEnd={routeIntent?.end}
+                     visibleAnimals={visibleAnimals}
+                     setVisibleAnimals={setVisibleAnimals}
+                     showPredictions={showPredictions}
+                     setShowPredictions={setShowPredictions}
+                     showNearbyRadius={showNearbyRadius}
+                     setShowNearbyRadius={setShowNearbyRadius}
+                     showAnimalMarkers={showAnimalMarkers}
+                     setShowAnimalMarkers={setShowAnimalMarkers}
+                     onStartNavigation={handleStartNavigation}
                  />
              </RNView>
 

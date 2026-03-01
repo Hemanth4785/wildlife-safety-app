@@ -49,7 +49,6 @@
       "fallbackToCacheTimeout": 0
     },
     "extra": {
-      "API_BASE_URL": "http://localhost:3000",
       "OPENAI_API_KEY": "",
       "OPENAI_MODEL": "gpt-3.5-turbo"
     }

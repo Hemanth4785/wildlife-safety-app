@@ -39,22 +39,30 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
                 status: 'degraded', 
                 error: true, 
                 statusCode: response.status,
-                message: "Service temporarily unavailable" 
+                message: `HTTP Error ${response.status}`
             };
         }
         return await response.json();
     } catch (error: any) {
-        if (retries > 0 && error.message.includes('Network request failed')) {
+        const isAbort = error.name === 'AbortError' || error.message?.includes('Aborted');
+        
+        if (retries > 0 && !isAbort && (error.message.includes('Network request failed') || error.message.includes('network'))) {
              logger.warn(`Fetch failed (network). Retrying in ${backoff}ms... (${retries} attempts left)`, error);
              await new Promise(resolve => setTimeout(resolve, backoff));
              return nativeFetch(url, options, retries - 1, backoff * 2);
         }
-        logger.error(`Critical fetch failure for ${url}`, error);
+        
+        if (isAbort) {
+            logger.error(`Critical fetch failure for ${url} - Request timed out (Aborted)`, { error: error.message });
+        } else {
+            logger.error(`Critical fetch failure for ${url}`, error);
+        }
+        
         // Fallback object instead of throwing
         return { 
             status: 'degraded', 
             error: true, 
-            message: error.message || "Network error" 
+            message: isAbort ? "Request timed out" : (error.message || "Network error")
         };
     }
 };
@@ -223,20 +231,24 @@ export const checkBackendHealth = async (): Promise<boolean> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return false;
 
-    if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
-        logger.error('Invalid API_BASE_URL for mobile: localhost is not accessible');
-        return false;
-    }
-
     const url = `${baseUrl}/api/health`;
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        // Increase timeout to 15s for slower network environments
+        const timeoutId = setTimeout(() => {
+            logger.warn(`[API] Health check timed out after 15s for ${url}`);
+            controller.abort();
+        }, 15000);
+        
         const response = await nativeFetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
         return !!response && response.status === 'ok';
-    } catch (error) {
-        logger.error('Backend health check failed', error);
+    } catch (error: any) {
+        if (error.name === 'AbortError') {
+            logger.error('Backend health check timed out (Aborted)', { url });
+        } else {
+            logger.error('Backend health check failed', error);
+        }
         return false;
     }
 };
@@ -834,6 +846,21 @@ export const getRoute = async (start: Location, end: Location, mode: TravelMode 
             distanceVal = response.distance;
             durationVal = response.duration;
         } 
+        // Case 4: GeoJSON FeatureCollection { features: [{ geometry: { coordinates: ... } }] }
+        else if (response && Array.isArray(response.features) && response.features.length > 0) {
+            const feature = response.features[0];
+            if (feature.geometry && Array.isArray(feature.geometry.coordinates)) {
+                path = feature.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+                distanceVal = feature.properties?.summary?.distance || 0;
+                durationVal = feature.properties?.summary?.duration || 0;
+            }
+        }
+        // Case 5: Direct coordinates array (some simplified backends)
+        else if (Array.isArray(response?.coordinates)) {
+            path = response.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+            distanceVal = response.distance || 0;
+            durationVal = response.duration || 0;
+        }
         // Case 2: Raw OSRM/ORS Response Structure { routes: [{ geometry: ... }] }
         else if (response && Array.isArray(response.routes) && response.routes.length > 0) {
             const route = response.routes[0];
@@ -887,7 +914,7 @@ export const getAnimalsNearRoute = async (routePath: [number, number][]): Promis
     const routeGeometry = routePath.map(p => [p[1], p[0]]);
 
     try {
-        const response = await fetch(url, {
+        const response = await nativeFetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -895,13 +922,16 @@ export const getAnimalsNearRoute = async (routePath: [number, number][]): Promis
             body: JSON.stringify({ routeGeometry })
         });
         
-        if (!response.ok) throw new Error(`Status ${response.status}`);
-        const data = await response.json();
+        if (response.error) throw new Error(response.message);
+        
+        const riskZones = response.riskZones || [];
+        logger.debug(`[API] Found ${riskZones.length} animals near route.`);
+        
         return {
-            riskZones: data.riskZones || [],
-            riskySegments: data.riskySegments || []
+            riskZones,
+            riskySegments: response.riskySegments || []
         };
-    } catch (error) {
+    } catch (error: any) {
         logger.error("Failed to fetch animals near route", error);
         return { riskZones: [], riskySegments: [] };
     }

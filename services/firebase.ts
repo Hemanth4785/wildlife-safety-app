@@ -37,4 +37,7 @@ if (Platform.OS === 'web') {
 export { auth };
 export const db = getFirestore(app);
 
+console.log("Firebase Auth Persistence initialized");
+console.log("Firestore Persistence enabled by default");
+
 export default app;

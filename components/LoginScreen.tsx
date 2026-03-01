@@ -38,6 +38,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSwitchToSignup }: 
                     setError('Incorrect password. Please try again.');
                 } else if (result.includes('auth/too-many-requests')) {
                     setError('Too many failed attempts. Please try again later.');
+                } else if (result.includes('auth/network-request-failed')) {
+                    setError('Network connection failed. Please check your internet connection and try again.');
                 } else {
                     setError(result);
                 }

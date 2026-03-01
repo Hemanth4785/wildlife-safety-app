@@ -81,7 +81,7 @@ npm install
 # Start the server
 node backend/index.js
 ```
-*Server runs on: `http://localhost:3000` (or your LAN IP)*
+*Server runs on: `http://10.151.200.199:3000` (your LAN IP)*
 
 ### Terminal 2: Mobile/Web Frontend
 Starts the Expo development server.

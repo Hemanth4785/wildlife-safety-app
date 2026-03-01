@@ -150,15 +150,20 @@ interface DashboardProps {
     weather: WeatherData | null;
     recentSightings?: Array<{ id: string; name: string; scientificName: string; emoji?: string; lat: number; lon: number; date: string; address?: string; image_url?: string }>;
     onNavigate: (view: ViewType) => void;
+    visibleAnimals?: Record<string, boolean>;
 }
 
 const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
-    const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate, recentSightings = [] } = props;
+    const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate, recentSightings = [], visibleAnimals = {} } = props;
+
+    const filteredPredictions = useMemo(() => {
+        return predictions.filter(p => visibleAnimals[p.scientific] !== false);
+    }, [predictions, visibleAnimals]);
 
     const dashboardStats = useMemo(() => {
-        const nearbyAlerts = predictions.filter((p: AnimalPrediction) => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
-        const speciesTracked = new Set(predictions.map((p: AnimalPrediction) => p.common)).size;
-        const totalSightings = predictions.length; 
+        const nearbyAlerts = filteredPredictions.filter((p: AnimalPrediction) => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
+        const speciesTracked = new Set(filteredPredictions.map((p: AnimalPrediction) => p.common)).size;
+        const totalSightings = filteredPredictions.length; 
         
         let riskScore = nearbyAlerts.length * 15 + totalSightings * 2;
         riskScore = Math.min(riskScore, 100);
@@ -174,11 +179,16 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
             totalSightings,
             alerts: nearbyAlerts,
         };
-    }, [predictions, user, safeRoute]);
+    }, [filteredPredictions, user, safeRoute]);
 
-    const greeting = getGreeting();
+    const filteredSightings = useMemo(() => {
+        // Only show sightings that the user has viewed/loaded on the Map (provided via props)
+        return recentSightings.filter(s => visibleAnimals[s.scientificName] !== false);
+    }, [recentSightings, visibleAnimals]);
+
     const displaySightings = useMemo(() => {
-        const predAsSightings = predictions.map((p) => ({
+        // Map predictions into sighting format if needed, but ensure they are within the filtered set
+        const predAsSightings = filteredPredictions.map((p) => ({
             id: `pred-${p.id}`,
             name: p.common,
             scientificName: p.scientific,
@@ -187,19 +197,37 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
             lat: p.current.lat,
             lon: p.current.lon,
             date: new Date().toISOString(),
-            address: p.current.addr
+            address: p.current.addr,
+            risk: p.metadata?.confidence === 'high' ? 'High' : 'Medium'
         }));
-        const merged = [...recentSightings, ...predAsSightings];
+        
+        // Merge recent sightings (which are region-specific from Map) with current predictions
+        const merged = [...filteredSightings, ...predAsSightings];
         const seen = new Set<string>();
         const unique = [];
+        
         for (const s of merged) {
+            // Deduplicate by name and address to show only unique visible data
             const key = `${(s.name || '').toLowerCase()}|${(s.address || '').toLowerCase()}`;
             if (seen.has(key)) continue;
             seen.add(key);
             unique.push(s);
         }
-        return unique;
-    }, [recentSightings, predictions]);
+        
+        // Sort by date descending so the most recent viewed data is first
+        return unique.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [filteredSightings, filteredPredictions]);
+
+    const highRiskAlerts = useMemo(() => {
+        // Alerts must derive strictly from the currently viewed high-risk data
+        return filteredPredictions.filter(p => 
+            p.metadata?.confidence === 'high' || 
+            p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM) ||
+            ['tiger', 'elephant', 'leopard', 'bear'].some(danger => p.scientific.toLowerCase().includes(danger))
+        ).slice(0, 5);
+    }, [filteredPredictions, user.nearbyRadiusKm]);
+
+    const greeting = getGreeting();
 
     const [selectedAlert, setSelectedAlert] = React.useState<AnimalPrediction | null>(null);
     const [selectedSighting, setSelectedSighting] = React.useState<{ id: string; name: string; scientificName: string; emoji?: string; image_url?: string; date: string; address?: string } | null>(null);
@@ -213,7 +241,7 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                 </Text>
             </View>
             
-            {(status === AppState.IDLE || status === AppState.LOADING) && !predictions.length ? (
+            {(status === AppState.IDLE || status === AppState.LOADING) && !filteredPredictions.length ? (
                 <View style={styles.emptyState}>
                     {status === AppState.LOADING ? (
                         <SpinnerIcon width={32} height={32} color="#059669" />
@@ -263,19 +291,22 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                                 Object.entries(displaySightings.reduce((acc: Record<string, number>, s) => {
                                     acc[s.name] = (acc[s.name] || 0) + 1;
                                     return acc;
-                                }, {})).map(([name, count]) => (
-                                    <View key={name} style={styles.alertItem}>
-                                        <Text style={styles.alertEmoji}>🐾</Text>
-                                        <View style={styles.alertContent}>
-                                            <Text style={styles.alertName}>{name}</Text>
-                                            <Text style={styles.alertDistance}>{count} recent sighting{count === 1 ? '' : 's'}</Text>
+                                }, {})).map(([name, count]) => {
+                                    const sighting = displaySightings.find(s => s.name === name);
+                                    return (
+                                        <View key={name} style={styles.alertItem}>
+                                            <Text style={styles.alertEmoji}>{sighting?.emoji || '🐾'}</Text>
+                                            <View style={styles.alertContent}>
+                                                <Text style={styles.alertName}>{name}</Text>
+                                                <Text style={styles.alertDistance}>{count} active marker{count === 1 ? '' : 's'} on map</Text>
+                                            </View>
                                         </View>
-                                    </View>
-                                ))
+                                    );
+                                })
                             ) : (
                                 <View style={styles.noAlerts}>
-                                    <Text style={styles.noAlertsText}>No species sightings yet.</Text>
-                                    <Text style={styles.noAlertsSubtext}>Open Map to load recent wildlife in your area.</Text>
+                                    <Text style={styles.noAlertsText}>No species sightings in view.</Text>
+                                    <Text style={styles.noAlertsSubtext}>Move the map or adjust filters to see wildlife data.</Text>
                                 </View>
                             )}
                         </View>
@@ -301,7 +332,7 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                         <Text style={styles.sectionTitle}>Recent Wildlife Sightings</Text>
                         <View style={styles.alertsList}>
                             {displaySightings.length > 0 ? (
-                                displaySightings.map((s) => (
+                                displaySightings.slice(0, 5).map((s) => (
                                     <TouchableOpacity key={s.id} style={styles.alertItem} onPress={() => setSelectedSighting(s)}>
                                         {s.image_url ? <Image source={{ uri: s.image_url }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 10 }} /> : <Text style={styles.alertEmoji}>{s.emoji || '🐾'}</Text>}
                                         <View style={styles.alertContent}>
@@ -312,8 +343,8 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                                 ))
                             ) : (
                                 <View style={styles.noAlerts}>
-                                    <Text style={styles.noAlertsText}>No sightings loaded yet.</Text>
-                                    <Text style={styles.noAlertsSubtext}>Open Map to load recent wildlife in your area.</Text>
+                                    <Text style={styles.noAlertsText}>No sightings in current view.</Text>
+                                    <Text style={styles.noAlertsSubtext}>Wildlife data updates as you explore the map.</Text>
                                 </View>
                             )}
                         </View>
@@ -322,16 +353,16 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
                     <View style={styles.alertsSection}>
                         <Text style={styles.sectionTitle}>Recent Wildlife Alerts</Text>
                         <View style={styles.alertsList}>
-                            {dashboardStats.alerts.length > 0 ? (
-                                dashboardStats.alerts.map((alert: AnimalPrediction) => (
+                            {highRiskAlerts.length > 0 ? (
+                                highRiskAlerts.map((alert: AnimalPrediction) => (
                                     <TouchableOpacity key={alert.id} onPress={() => setSelectedAlert(alert)}>
                                         <AlertItem alert={alert} recentSightings={recentSightings} />
                                     </TouchableOpacity>
                                 ))
                             ) : (
                                 <View style={styles.noAlerts}>
-                                    <Text style={styles.noAlertsText}>No recent wildlife alerts in your area.</Text>
-                                    <Text style={styles.noAlertsSubtext}>It's quiet for now. Stay vigilant.</Text>
+                                    <Text style={styles.noAlertsText}>No high-risk alerts in current view.</Text>
+                                    <Text style={styles.noAlertsSubtext}>Everything looks safe in your explored area.</Text>
                                 </View>
                             )}
                         </View>

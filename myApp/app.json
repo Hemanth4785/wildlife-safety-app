@@ -45,7 +45,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "API_BASE_URL": "http://10.211.106.199:3000",
+      "API_BASE_URL": "",
       "eas": {
         "projectId": "6d958561-1e9d-4357-9d75-43098522e84c"
       }

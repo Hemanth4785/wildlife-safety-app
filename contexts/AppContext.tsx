@@ -11,6 +11,8 @@ import * as authService from '../services/authService';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { auth } from '../services/firebase';
+import { useAnimalData } from '../hooks/useAnimalData';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 interface AppState {
   user: AppUser | null;
@@ -19,7 +21,55 @@ interface AppState {
   showOnboarding: boolean;
 }
 
-interface AppContextValue extends AppState {
+interface AnimalDataState {
+  status: any;
+  message: string;
+  userLocation: any;
+  predictions: any[];
+  processLocationSearch: (location: any) => Promise<void>;
+  searchHistory: string[];
+  clearSearchHistory: () => void;
+  suggestions: any[];
+  isSuggesting: boolean;
+  fetchSuggestions: (query: string) => void;
+  clearSuggestions: () => void;
+  safeRoute: any;
+  routeStatus: any;
+  routeMessage: string;
+  calculateSafeRoute: (...args: any[]) => Promise<any>;
+  safePlaces: any[];
+  riskZones: any[];
+  riskySegments: any[];
+  isNavigating: boolean;
+  liveLocation: any;
+  navigationStats: any;
+  startNavigation: (radius: number) => void;
+  stopNavigation: () => void;
+  navigationAlert: any;
+  clearNavigationAlert: () => void;
+  closestPathIndex: number;
+  getCurrentLocation: () => Promise<any>;
+  weather: any;
+  isApproachingStart: boolean;
+  backendReady: boolean | null;
+  backendError: string | null;
+  recentSightings: any[];
+  isWildlifeLoading: boolean;
+  isLocationLoading: boolean;
+  isRouteLoading: boolean;
+  
+  // Filters (moved to context for sync)
+  visibleAnimals: Record<string, boolean>;
+  setVisibleAnimals: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
+  showPredictions: boolean;
+  setShowPredictions: (val: boolean) => void;
+  showNearbyRadius: boolean;
+  setShowNearbyRadius: (val: boolean) => void;
+  showAnimalMarkers: boolean;
+  setShowAnimalMarkers: (val: boolean) => void;
+}
+
+interface AppContextValue extends AppState, AnimalDataState {
   // User actions
   login: (email: string, password: string) => Promise<string | null>;
   signup: (name: string, email: string, password: string) => Promise<string | null>;
@@ -57,7 +107,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // Initialize app data
+  // Hook into animal data
+   const animalData = useAnimalData(!!user);
+ 
+   // Filters state (moved from MapView to context with persistence)
+   const [visibleAnimals, setVisibleAnimals] = useLocalStorage<Record<string, boolean>>('map-filter-animals', {});
+   const [showPredictions, setShowPredictions] = useLocalStorage<boolean>('map-filter-predictions', false);
+   const [showNearbyRadius, setShowNearbyRadius] = useLocalStorage<boolean>('map-filter-radius', true);
+   const [showAnimalMarkers, setShowAnimalMarkers] = useLocalStorage<boolean>('map-filter-markers', true);
+ 
+   // Initialize app data
   const initializeApp = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -119,15 +178,36 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       if (!firebaseUser) {
         setUser(null);
         setIsLoading(false);
+        // Clear cached profile on logout
+        storage.removeItem('user_profile');
         return;
       }
 
       try {
-        // Load Firestore profile
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          setUser(userDoc.data() as AppUser);
-          setShowOnboarding(userDoc.data().isNewUser ?? false);
+        // Try loading cached profile first for immediate responsiveness
+        const cachedProfile = await storage.getItem<AppUser>('user_profile');
+        if (cachedProfile && cachedProfile.uid === firebaseUser.uid) {
+          setUser(cachedProfile);
+          setShowOnboarding(cachedProfile.isNewUser ?? false);
+        }
+
+        // Load Firestore profile with timeout/error handling
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as AppUser;
+            setUser(userData);
+            setShowOnboarding(userData.isNewUser ?? false);
+            // Cache the successful profile
+            storage.setItem('user_profile', userData);
+          }
+        } catch (firestoreError: any) {
+          // If offline, we already set the user from cache if it existed
+          if (firestoreError.code === 'unavailable' || firestoreError.message?.includes('offline')) {
+            logger.warn('Firestore offline, using cached profile if available');
+          } else {
+            throw firestoreError;
+          }
         }
       } catch (error) {
         logger.error('Failed to load user profile', error);
@@ -249,6 +329,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     addReport,
     removeReport,
     initializeApp,
+    ...animalData,
+    visibleAnimals,
+    setVisibleAnimals,
+    showPredictions,
+    setShowPredictions,
+    showNearbyRadius,
+    setShowNearbyRadius,
+    showAnimalMarkers,
+    setShowAnimalMarkers,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

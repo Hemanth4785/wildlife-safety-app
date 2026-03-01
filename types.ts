@@ -30,6 +30,11 @@ export interface AnimalPrediction {
     current: PredictionPoint & { dist_km: number };
     preds: PredictionPoint[];
     fullPath: [number, number][];
+    metadata?: {
+        scope?: string;
+        confidence?: string;
+    };
+    risk?: string;
 }
 
 export interface Route {

@@ -414,15 +414,25 @@ const getHistoricalData = () => readJsonArray(WILDLIFE_CACHE_PATH);
 // The UI/routing shows only a recent window (default: last 30 days) to reduce clutter and focus on near-term risk.
 const getRecentData = (days = 30) => {
     const allData = getHistoricalData();
-    // Default to dynamic current date if days filter is applied
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
     
-    return allData.filter(item => {
+    const recent = allData.filter(item => {
         if (!item.eventDate || item.eventDate === "Unknown") return false;
         const d = new Date(item.eventDate);
         return d >= cutoff;
     });
+
+    // Fallback: If no data in the last 30 days, return the 50 most recent records from the entire cache
+    if (recent.length === 0 && allData.length > 0) {
+        console.log(`[Wildlife] No data found for the last ${days} days. Falling back to 50 latest records.`);
+        return allData
+            .filter(item => item.eventDate && item.eventDate !== "Unknown")
+            .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
+            .slice(0, 50);
+    }
+    
+    return recent;
 };
 
 const runInatPython = () => {
@@ -601,6 +611,7 @@ app.get('/api/route/osrm', async (req, res) => {
     }
 
     const straightLineRoute = (payload = {}) => {
+        console.log('[Route] TRIGGERED: Straight-line fallback.');
         const distKm = haversineDistanceKm(startLatN, startLonN, endLatN, endLonN);
         let speedKmh = 45;
         if (mode === 'walk') speedKmh = 4;
@@ -624,22 +635,52 @@ app.get('/api/route/osrm', async (req, res) => {
     // --- Helper: OSRM Logic ---
     const fetchOsrmRoute = async () => {
         try {
-            console.log('[OSRM] Attempting OSRM fallback...');
-            const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'http://router.project-osrm.org';
-            // Map modes: car->driving, walk->foot, bike->bike
+            console.log('[Route] ATTEMPTING: OSRM fallback...');
+            // Try HTTPS first, then fallback to HTTP if needed.
+            const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+            
             let osrmProfile = 'driving';
-            if (mode === 'walk') osrmProfile = 'foot';
-            else if (mode === 'bike') osrmProfile = 'bike';
+            if (process.env.OSRM_BASE_URL) {
+                if (mode === 'walk') osrmProfile = 'foot';
+                else if (mode === 'bike') osrmProfile = 'bike';
+            }
             
-            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
-            console.log(`[OSRM] Fetching: ${url}`);
+            const sLon = String(startLon).trim();
+            const sLat = String(startLat).trim();
+            const eLon = String(endLon).trim();
+            const eLat = String(endLat).trim();
+
+            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson`;
+            console.log(`[OSRM] Fetching URL: ${url}`);
             
-            const response = await axios.get(url, { timeout: 8000 });
+            const response = await axios.get(url, { 
+                timeout: 15000, // Increased timeout to 15s
+                headers: { 
+                    'User-Agent': 'WildlifeSafetyApp/1.0',
+                    'Accept': 'application/json'
+                },
+                validateStatus: (status) => status < 500 // Don't throw on 4xx errors
+            });
+
+            if (response.status !== 200) {
+                console.error(`[OSRM] Request failed with status ${response.status}:`, JSON.stringify(response.data));
+                return { status: 'failed', error: `HTTP ${response.status}` };
+            }
+
             if (!response.data.routes || response.data.routes.length === 0) {
-                return { status: 'degraded', error: 'No OSRM route found', ...straightLineRoute({ error: 'No OSRM route found' }) };
+                console.warn('[OSRM] WARNING: No routes found in response data.');
+                return { status: 'failed', error: 'No OSRM route found' };
             }
             
             const route = response.data.routes[0];
+            const pointCount = route.geometry?.coordinates?.length || 0;
+            
+            if (pointCount <= 2) {
+                console.warn('[OSRM] WARNING: OSRM returned a straight line (2 points). Snap distance might be too large.');
+            } else {
+                console.log(`[OSRM] SUCCESS: Decoded path with ${pointCount} points.`);
+            }
+
             return {
                 geometry: route.geometry,
                 distance: route.distance,
@@ -648,7 +689,10 @@ app.get('/api/route/osrm', async (req, res) => {
                 source: 'osrm'
             };
         } catch (error) {
-            console.error("[OSRM] Failed:", error.message);
+            console.error("[OSRM] CRITICAL ERROR:", error.message);
+            if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+                console.error("[OSRM] Service unreachable. Check your internet connection.");
+            }
             return { status: 'failed', error: error.message };
         }
     };
@@ -658,13 +702,14 @@ app.get('/api/route/osrm', async (req, res) => {
     const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
     if (!useGoogle || !API_KEY) {
-        console.log('[Route] Google disabled or key missing. Using OSRM directly.');
+        console.log('[Route] INFO: Google disabled or key missing. Routing via OSRM.');
         const osrmResult = await fetchOsrmRoute();
         if (osrmResult.status === 'success') return res.json(osrmResult);
         return res.json(straightLineRoute({ error: 'Routing service unavailable', message: "Using straight-line fallback" }));
     }
 
     // --- Google Routes Logic ---
+    console.log('[Route] ATTEMPTING: Google Routes API...');
     // Map internal travel mode to Google Routes API travel mode
     let travelMode = 'DRIVE';
     if (mode === 'walk') travelMode = 'WALK';
@@ -735,6 +780,13 @@ app.get('/api/route/osrm', async (req, res) => {
         const encodedPolyline = route.polyline.encodedPolyline;
         const path = polyline.decode(encodedPolyline);
         const geoJsonCoordinates = path.map(p => [p[1], p[0]]); // [lat, lon] -> [lon, lat]
+
+        const pointCount = geoJsonCoordinates.length;
+        console.log(`[Google Routes] SUCCESS: Decoded path with ${pointCount} points.`);
+        
+        if (pointCount <= 2) {
+            console.warn('[Google Routes] WARNING: Route has 2 or fewer points (likely a straight line).');
+        }
 
         let durationSeconds = 0;
         if (route.duration) {
@@ -821,12 +873,17 @@ app.post('/api/animals/near-route', (req, res) => {
 
         const distKm = minDistanceToRoute(lat, lon, routePath);
         
-        if (distKm <= 2.0) {
-            riskZones.push({ ...animal, riskLevel: 'HIGH', distanceToRoute: distKm });
-        } else if (distKm <= 5.0) {
-            riskZones.push({ ...animal, riskLevel: 'CAUTION', distanceToRoute: distKm });
+        if (distKm <= 5.0) {
+            console.log(`[RiskAnalysis] Animal ${animal.animal} (${animal.scientific_name}) found at ${distKm.toFixed(2)}km from route.`);
+            riskZones.push({ 
+                ...animal, 
+                riskLevel: distKm <= 2.0 ? 'HIGH' : 'CAUTION', 
+                distanceToRoute: distKm 
+            });
         }
     });
+
+    console.log(`[RiskAnalysis] Total animals found on route: ${riskZones.length}`);
 
     res.json({
         riskZones,

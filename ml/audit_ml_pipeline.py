@@ -16,7 +16,7 @@ LSTM_PY = os.path.join(ROOT_DIR, "ml", "predict_movement.py")
 MAXENT_PY = os.path.join(ROOT_DIR, "ml", "predict_maxent.py")
 RISK_PY = os.path.join(ROOT_DIR, "ml", "predict_risk.py")
 PY_EXE = os.path.join(ROOT_DIR, "lstm_env", "Scripts", "python.exe")
-BASE_URL = os.environ.get("AUDIT_BASE_URL", "http://localhost:3000").rstrip("/")
+BASE_URL = os.environ.get("AUDIT_BASE_URL", "http://10.151.200.199:3000").rstrip("/")
 
 
 ANIMALS = ["Asian Elephant", "Gaur", "Tiger", "Sloth Bear", "Leopard"]
