@@ -33,6 +33,7 @@ interface AnimalDataState {
   isSuggesting: boolean;
   fetchSuggestions: (query: string) => void;
   clearSuggestions: () => void;
+  searchError: string | null;
   safeRoute: any;
   routeStatus: any;
   routeMessage: string;
@@ -57,6 +58,12 @@ interface AnimalDataState {
   isWildlifeLoading: boolean;
   isLocationLoading: boolean;
   isRouteLoading: boolean;
+  
+  // Historical Mode
+  historicalMode: boolean;
+  setHistoricalMode: (val: boolean) => void;
+  historicalDateRange: { startDate: string; endDate: string } | null;
+  setHistoricalDateRange: (val: { startDate: string; endDate: string } | null | ((prev: { startDate: string; endDate: string } | null) => { startDate: string; endDate: string } | null)) => void;
   
   // Filters (moved to context for sync)
   visibleAnimals: Record<string, boolean>;

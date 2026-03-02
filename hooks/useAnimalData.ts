@@ -3,7 +3,7 @@ import type { Location, AnimalPrediction, Sighting, Route, NavigationStats, Navi
 import { AppState } from '../types';
 import * as api from '../services/apiService';
 import * as geo from '../services/geoService';
-import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS, MAP_CENTER } from '../constants';
+import { ANIMALS, RADIUS_KM, SEQ_LEN, SMOOTH_STEPS, MAP_CENTER, isWithinSouthIndia } from '../constants';
 import { storage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import * as ExpoLocation from 'expo-location';
@@ -59,6 +59,7 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
     const [riskySegments, setRiskySegments] = useState<any[]>([]);
     const [routeStatus, setRouteStatus] = useState<AppState>(AppState.IDLE);
     const [routeMessage, setRouteMessage] = useState('');
+    const [searchError, setSearchError] = useState<string | null>(null);
     const [weather, setWeather] = useState<WeatherData | null>(null);
     const isPredictingRef = useRef(false);
     const [backendReady, setBackendReady] = useState<boolean | null>(null);
@@ -67,6 +68,10 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
     // --- Wildlife Sightings State (Loaded once on start) ---
     const [recentSightings, setRecentSightings] = useState<any[]>([]);
     const [isWildlifeLoading, setIsWildlifeLoading] = useState(true);
+
+    // --- Historical Mode State ---
+    const [historicalMode, setHistoricalMode] = useState(false);
+    const [historicalDateRange, setHistoricalDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
 
     // --- Loading States for UX ---
     const [isLocationLoading, setIsLocationLoading] = useState(false);
@@ -205,6 +210,16 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
         const weatherData = await api.getWeatherData(finalLocation.lat, finalLocation.lon);
         setWeather(weatherData);
 
+        // Fetch safe places for the new area
+        try {
+            const places = await api.findSafePlacesNear(finalLocation.lat, finalLocation.lon, 15);
+            if (places && places.length > 0) {
+                setSafePlaces(places);
+            }
+        } catch (e) {
+            logger.warn("Failed to fetch safe places for new area", e);
+        }
+
         await getPredictionsForArea(finalLocation);
     }, [searchHistory, setSearchHistory, getPredictionsForArea]);
 
@@ -232,6 +247,14 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 endLoc = results[0];
             } else {
                 endLoc = end;
+            }
+
+            // Regional Restriction: Check if start or end is outside South India
+            if (!isWithinSouthIndia(startLoc.lat, startLoc.lon) || !isWithinSouthIndia(endLoc.lat, endLoc.lon)) {
+                setRouteStatus(AppState.ERROR);
+                setIsRouteLoading(false);
+                setRouteMessage('Wildlife Safety is currently supported only in South India.');
+                return null;
             }
 
             const route = await api.getRoute(startLoc, endLoc);
@@ -269,19 +292,35 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
 
     const fetchSuggestions = useCallback((query: string) => {
         if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-        if (!query.trim()) {
+        
+        const q = query.trim();
+        if (q.length < 3) {
             setSuggestions([]);
+            setIsSuggesting(false);
+            setSearchError(null);
             return;
         }
+
         setIsSuggesting(true);
+        setSearchError(null);
         debounceTimeout.current = setTimeout(async () => {
-            const results = await api.searchLocations(query);
-            setSuggestions(results);
-            setIsSuggesting(false);
-        }, 300) as unknown as number;
+            try {
+                const results = await api.searchLocations(q);
+                setSuggestions(results);
+            } catch (error: any) {
+                logger.error("Suggestion fetch error", error);
+                setSuggestions([]);
+                setSearchError("Location search unavailable");
+            } finally {
+                setIsSuggesting(false);
+            }
+        }, 500) as unknown as number; // 500ms debounce
     }, []);
 
-    const clearSuggestions = useCallback(() => setSuggestions([]), []);
+    const clearSuggestions = useCallback(() => {
+        setSuggestions([]);
+        setSearchError(null);
+    }, []);
 
     const getCurrentLocation = useCallback(async (): Promise<Location> => {
         setIsLocationLoading(true);
@@ -335,19 +374,24 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 setBackendError('Backend API is not reachable. Some features may be limited.');
             }
 
+            // If a route is active, we IGNORE historical mode and strictly show current to 30 days
+            const isHistoricalActive = historicalMode && historicalDateRange && !safeRoute;
+
             // Always try to fetch wildlife, as api.fetchRecentWildlife has a static fallback
             try {
                 setIsWildlifeLoading(true);
-                const data = await api.fetchRecentWildlife();
+                const data = isHistoricalActive
+                    ? await api.fetchRecentWildlife(historicalDateRange.startDate, historicalDateRange.endDate)
+                    : await api.fetchRecentWildlife();
                 setRecentSightings(data);
             } catch (err) {
-                logger.error('Failed to fetch initial wildlife sightings', err);
+                logger.error('Failed to fetch wildlife sightings', err);
             } finally {
                 setIsWildlifeLoading(false);
             }
         };
         checkBackend();
-    }, [shouldFetch]);
+    }, [shouldFetch, historicalMode, historicalDateRange, safeRoute]);
 
     useEffect(() => {
         if (!shouldFetch) return;
@@ -358,10 +402,20 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 setMessage("Getting your location for weather data...");
                 const location = await getCurrentLocation();
                 setUserLocation(location);
-                const weatherData = await api.getWeatherData(location.lat, location.lon);
+                
+                // Fetch weather and safe places in parallel
+                const [weatherData, places] = await Promise.all([
+                    api.getWeatherData(location.lat, location.lon),
+                    api.findSafePlacesNear(location.lat, location.lon, 10)
+                ]);
+                
                 setWeather(weatherData);
+                if (places && places.length > 0) {
+                    setSafePlaces(places);
+                }
+                
                 setStatus(AppState.SUCCESS);
-                setMessage("Displaying local weather. Search an area to see wildlife risks.");
+                setMessage("Displaying local weather and safe spots. Search an area to see wildlife risks.");
             } catch (error: any) {
                 logger.error("Failed to fetch initial location/weather", error);
                 const fallbackLocation = { lat: MAP_CENTER[0], lon: MAP_CENTER[1], name: 'Default Center' };
@@ -393,7 +447,7 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
         setNavigationStats(null);
         setNavigationAlert(null);
         setSafeRoute(null);
-        setSafePlaces([]);
+        // Do NOT clear safe places here so they remain visible on the map
         setIsApproachingStart(false);
         isApproachingStartRef.current = false;
     }, []);
@@ -402,126 +456,152 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
     useEffect(() => { safeRouteRef.current = safeRoute; }, [safeRoute]);
 
     const startNavigation = useCallback(async (nearbyRadius: number) => {
-        if (!safeRouteRef.current || !safeRouteRef.current.path || safeRouteRef.current.path.length === 0) {
-            setRouteMessage('Cannot start navigation without a calculated route.');
-            setRouteStatus(AppState.ERROR);
-            return;
-        }
-
-        const PROXIMITY_ALERT_KM = nearbyRadius / 5;
-        const APPROACHING_START_THRESHOLD_KM = 0.5;
-
-        setIsNavigating(true);
-        setNavigationAlert(null);
-
-        if (watchSubscriptionRef.current !== null) {
-            watchSubscriptionRef.current.remove();
-        }
-
-        // Request permissions
-        const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-            setNavigationAlert({ animal: null, message: 'Location permission denied. Please enable location services.' });
-            setIsNavigating(false);
-            return;
-        }
-
-        watchSubscriptionRef.current = await ExpoLocation.watchPositionAsync(
-            {
-                accuracy: ExpoLocation.Accuracy.High,
-                timeInterval: 1000,
-                distanceInterval: 10,
-            },
-            async (position: ExpoLocation.LocationObject) => {
-                // If we just recovered from a GPS error, clear the alert.
-                if (navigationAlertRef.current?.message.includes("Live location signal lost")) {
-                    clearNavigationAlert();
-                }
-
-                const currentLiveLocation: Location = {
-                    lat: position.coords.latitude,
-                    lon: position.coords.longitude,
-                    name: 'Live Location'
-                };
-                setLiveLocation(currentLiveLocation);
-
-                if (!safeRouteRef.current) return;
-
-                const { path: routePath, end: routeEnd, mode: routeMode } = safeRouteRef.current;
-                const { remainingPath, distanceToPathKm, closestPointIndex: newClosestPointIndex } = geo.getPathDataFromLocation(currentLiveLocation, routePath);
-                
-                const distanceToStart = geo.calculateDistance(currentLiveLocation, { lat: routePath[0][0], lon: routePath[0][1] });
-
-                // Handle approaching start logic
-                const wasApproaching = isApproachingStartRef.current;
-                const isNowApproaching = newClosestPointIndex === 0 && distanceToStart > APPROACHING_START_THRESHOLD_KM;
-                
-                if (isNowApproaching) {
-                    if (!wasApproaching) {
-                        isApproachingStartRef.current = true;
-                        setIsApproachingStart(true);
-                    }
-                    setMessage(`Proceed to the starting point. You are ${distanceToStart.toFixed(1)} km away.`);
-                    setNavigationStats({
-                        remainingKm: safeRouteRef.current.distanceKm,
-                        etaMinutes: safeRouteRef.current.durationMinutes,
-                        progressPercent: 0
-                    });
-                    return;
-                } else if (wasApproaching && !isNowApproaching) {
-                    isApproachingStartRef.current = false;
-                    setIsApproachingStart(false);
-                    setNavigationAlert({ animal: null, message: "You've reached the start. Navigation has begun!" });
-                }
-
-                setClosestPathIndex(newClosestPointIndex);
-
-                const remainingDistanceKm = geo.calculatePolylineDistance(remainingPath);
-                const totalDistanceKm = safeRouteRef.current.distanceKm;
-                const progressPercent = totalDistanceKm > 0 ? Math.round(((totalDistanceKm - remainingDistanceKm) / totalDistanceKm) * 100) : 0;
-                
-                const avgSpeedKpm = totalDistanceKm > 0 ? totalDistanceKm / safeRouteRef.current.durationMinutes : 1;
-                const etaMinutes = remainingDistanceKm / avgSpeedKpm;
-
-                setNavigationStats({
-                    remainingKm: parseFloat(remainingDistanceKm.toFixed(1)),
-                    etaMinutes: Math.round(etaMinutes),
-                    progressPercent: Math.max(0, Math.min(100, progressPercent)),
-                });
-
-                const now = Date.now();
-
-                if (now - lastRerouteTimestampRef.current > REROUTE_COOLDOWN_MS) {
-                    // Check for route deviation
-                    if (distanceToPathKm > DEVIATION_THRESHOLD_KM) {
-                        lastRerouteTimestampRef.current = now;
-                        setNavigationAlert({ animal: null, message: "You've deviated from the safe route. Rerouting..." });
-                        await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode);
-                        return;
-                    }
-                    
-                    let closestAnimal: AnimalPrediction | null = null;
-                    let closestDistKm = Infinity;
-                    const preds = predictionsRef.current;
-                    for (const animal of preds) {
-                        const { distanceToPathKm: distKm } = geo.getPathDataFromLocation(currentLiveLocation, animal.fullPath);
-                        if (distKm < closestDistKm) {
-                            closestDistKm = distKm;
-                            closestAnimal = animal;
-                        }
-                    }
-
-                    if (closestAnimal && closestDistKm < PROXIMITY_ALERT_KM) {
-                        lastRerouteTimestampRef.current = now;
-                        const alertAnimal = closestAnimal;
-                        setNavigationAlert({ animal: alertAnimal, message: `Approaching ${alertAnimal.common}! Rerouting to a safer path.` });
-                        await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode, [alertAnimal.id]);
-                        return;
-                    }
-                }
-
+        try {
+            if (!safeRouteRef.current || !safeRouteRef.current.path || safeRouteRef.current.path.length === 0) {
+                setRouteMessage('Cannot start navigation without a calculated route.');
+                setRouteStatus(AppState.ERROR);
+                return;
             }
-        );
+
+            const PROXIMITY_ALERT_KM = nearbyRadius / 5;
+            const APPROACHING_START_THRESHOLD_KM = 0.5;
+
+            setIsNavigating(true);
+            setNavigationAlert(null);
+
+            if (watchSubscriptionRef.current !== null) {
+                watchSubscriptionRef.current.remove();
+            }
+
+            // Request permissions
+            const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                setNavigationAlert({ animal: null, message: 'Location permission denied. Please enable location services.' });
+                setIsNavigating(false);
+                return;
+            }
+
+            watchSubscriptionRef.current = await ExpoLocation.watchPositionAsync(
+                {
+                    accuracy: ExpoLocation.Accuracy.High,
+                    timeInterval: 1000,
+                    distanceInterval: 10,
+                },
+                async (position: ExpoLocation.LocationObject) => {
+                    try {
+                        if (!position || !position.coords) return;
+                        
+                        // If we just recovered from a GPS error, clear the alert.
+                        if (navigationAlertRef.current?.message.includes("Live location signal lost")) {
+                            clearNavigationAlert();
+                        }
+
+                        const currentLiveLocation: Location = {
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude,
+                            name: 'Live Location'
+                        };
+                        setLiveLocation(currentLiveLocation);
+
+                        if (!safeRouteRef.current || !Array.isArray(safeRouteRef.current.path) || safeRouteRef.current.path.length < 2) return;
+
+                        const { path: routePath, end: routeEnd, mode: routeMode } = safeRouteRef.current;
+                        const { remainingPath, distanceToPathKm, closestPointIndex: newClosestPointIndex } = geo.getPathDataFromLocation(currentLiveLocation, routePath);
+                        
+                        // Check if path point exists before accessing
+                        if (!routePath[0] || routePath[0].length < 2) return;
+                        const distanceToStart = geo.calculateDistance(currentLiveLocation, { lat: routePath[0][0], lon: routePath[0][1] });
+
+                        // Handle approaching start logic
+                        const wasApproaching = isApproachingStartRef.current;
+                        const isNowApproaching = newClosestPointIndex === 0 && distanceToStart > APPROACHING_START_THRESHOLD_KM;
+                        
+                        if (isNowApproaching) {
+                            if (!wasApproaching) {
+                                isApproachingStartRef.current = true;
+                                setIsApproachingStart(true);
+                            }
+                            setMessage(`Proceed to the starting point. You are ${distanceToStart.toFixed(1)} km away.`);
+                            setNavigationStats({
+                                remainingKm: safeRouteRef.current.distanceKm,
+                                etaMinutes: safeRouteRef.current.durationMinutes,
+                                progressPercent: 0
+                            });
+                            return;
+                        } else if (wasApproaching && !isNowApproaching) {
+                            isApproachingStartRef.current = false;
+                            setIsApproachingStart(false);
+                            setNavigationAlert({ animal: null, message: "You've reached the start. Navigation has begun!" });
+                        }
+
+                        setClosestPathIndex(newClosestPointIndex);
+
+                        const remainingDistanceKm = geo.calculatePolylineDistance(remainingPath);
+                        const totalDistanceKm = safeRouteRef.current.distanceKm || 0;
+                        const progressPercent = totalDistanceKm > 0 ? Math.round(((totalDistanceKm - remainingDistanceKm) / totalDistanceKm) * 100) : 0;
+                        
+                        // Robust avg speed calculation
+                        let avgSpeedKpm = 0.5; // Default: ~30km/h
+                        const duration = safeRouteRef.current.durationMinutes;
+                        if (totalDistanceKm > 0 && typeof duration === 'number' && duration > 0) {
+                            avgSpeedKpm = totalDistanceKm / duration;
+                        } else {
+                            // Use travel mode as fallback
+                            const mode = safeRouteRef.current.mode;
+                            if (mode === 'walk') avgSpeedKpm = 4 / 60;
+                            else if (mode === 'bike') avgSpeedKpm = 12 / 60;
+                            else if (mode === 'bus') avgSpeedKpm = 30 / 60;
+                            else avgSpeedKpm = 45 / 60; // car/default
+                        }
+
+                        const etaMinutes = remainingDistanceKm / (avgSpeedKpm || 0.1);
+
+                        setNavigationStats({
+                            remainingKm: parseFloat(remainingDistanceKm.toFixed(1)),
+                            etaMinutes: Math.round(Number.isFinite(etaMinutes) ? etaMinutes : 0),
+                            progressPercent: Math.max(0, Math.min(100, progressPercent)),
+                        });
+
+                        const now = Date.now();
+
+                        if (now - lastRerouteTimestampRef.current > REROUTE_COOLDOWN_MS) {
+                            // Check for route deviation
+                            if (distanceToPathKm > DEVIATION_THRESHOLD_KM) {
+                                lastRerouteTimestampRef.current = now;
+                                setNavigationAlert({ animal: null, message: "You've deviated from the safe route. Rerouting..." });
+                                await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode);
+                                return;
+                            }
+                            
+                            let closestAnimal: AnimalPrediction | null = null;
+                            let closestDistKm = Infinity;
+                            const preds = predictionsRef.current;
+                            for (const animal of preds) {
+                                const { distanceToPathKm: distKm } = geo.getPathDataFromLocation(currentLiveLocation, animal.fullPath);
+                                if (distKm < closestDistKm) {
+                                    closestDistKm = distKm;
+                                    closestAnimal = animal;
+                                }
+                            }
+
+                            if (closestAnimal && closestDistKm < PROXIMITY_ALERT_KM) {
+                                lastRerouteTimestampRef.current = now;
+                                const alertAnimal = closestAnimal;
+                                setNavigationAlert({ animal: alertAnimal, message: `Approaching ${alertAnimal.common}! Rerouting to a safer path.` });
+                                await calculateSafeRoute(currentLiveLocation, routeEnd, nearbyRadius, routeMode, [alertAnimal.id]);
+                                return;
+                            }
+                        }
+                    } catch (err) {
+                        logger.error("Error in location watch callback", err);
+                    }
+                }
+            );
+        } catch (error) {
+            logger.error("Failed to start navigation", error);
+            setIsNavigating(false);
+            setNavigationAlert({ animal: null, message: 'Could not start navigation. Please try again.' });
+        }
     }, [stopNavigation, calculateSafeRoute, clearNavigationAlert]);
 
     const clearSearchHistory = () => setSearchHistory([]);
@@ -529,12 +609,13 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
     return {
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
-        suggestions, isSuggesting, fetchSuggestions, clearSuggestions,
+        suggestions, isSuggesting, fetchSuggestions, clearSuggestions, searchError,
         safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces, riskZones, riskySegments,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
         weather, isApproachingStart,
         backendReady, backendError,
-        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading
+        recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading,
+        historicalMode, setHistoricalMode, historicalDateRange, setHistoricalDateRange
     };
 };

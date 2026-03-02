@@ -38,6 +38,7 @@ interface RoutePlannerSheetProps {
     isSuggesting: boolean;
     onFetchSuggestions: (query: string) => void;
     onClearSuggestions: () => void;
+    searchError: string | null;
     getCurrentLocation: () => Promise<Location>;
     nearbyRadiusKm: number;
     isLocationLoading: boolean;
@@ -48,7 +49,7 @@ interface RoutePlannerSheetProps {
 
 const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
     isOpen, onClose, onSuccess, onCalculateSafeRoute, routeStatus, routeMessage,
-    suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions,
+    suggestions, isSuggesting, onFetchSuggestions, onClearSuggestions, searchError,
     getCurrentLocation, nearbyRadiusKm, isLocationLoading, isRouteLoading,
     initialStartQuery, initialDestQuery
 }) => {
@@ -240,10 +241,10 @@ const RoutePlannerSheet: React.FC<RoutePlannerSheetProps> = ({
                         {isRouteLoading ? 'Calculating...' : 'Find Safe Route'}
                     </Text>
                 </TouchableOpacity>
-                {(localError || (routeStatus === AppState.ERROR && routeMessage)) && (
+                {(localError || searchError || (routeStatus === AppState.ERROR && routeMessage)) && (
                     <View style={styles.errorContainer}>
                         <ErrorIcon width={20} height={20} color="#ef4444" />
-                        <Text style={styles.errorText}>{localError || routeMessage}</Text>
+                        <Text style={styles.errorText}>{localError || searchError || routeMessage}</Text>
                     </View>
                 )}
             </ScrollView>
@@ -266,6 +267,7 @@ interface MapViewProps {
     isSuggesting: boolean;
     onFetchSuggestions: (query: string) => void;
     onClearSuggestions: () => void;
+    searchError: string | null;
     routeStatus: AppState;
     routeMessage: string;
     onCalculateSafeRoute: (start: Location | string, end: Location | string, radius: number, mode: TravelMode) => Promise<Route | null>;
@@ -301,6 +303,12 @@ interface MapViewProps {
     setShowNearbyRadius: (val: boolean) => void;
     showAnimalMarkers: boolean;
     setShowAnimalMarkers: (val: boolean) => void;
+
+    // Historical Mode
+    historicalMode: boolean;
+    setHistoricalMode: (val: boolean) => void;
+    historicalDateRange: { startDate: string; endDate: string } | null;
+    setHistoricalDateRange: (val: { startDate: string; endDate: string } | null | ((prev: { startDate: string; endDate: string } | null) => { startDate: string; endDate: string } | null)) => void;
 }
 
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
@@ -323,13 +331,15 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         onStartNavigation, onStopNavigation, navigationAlert, clearNavigationAlert, closestPathIndex,
         isPlaying, onPlay, onPause, isApproachingStart,
         onCalculateSafeRoute, routeStatus, routeMessage, suggestions,
-        isSuggesting, onFetchSuggestions, onClearSuggestions, getCurrentLocation,
+        isSuggesting, onFetchSuggestions, onClearSuggestions, searchError, getCurrentLocation,
         recentSightings, isWildlifeLoading, isLocationLoading, isRouteLoading,
         reports = [],
         visibleAnimals, setVisibleAnimals,
         showPredictions, setShowPredictions,
         showNearbyRadius, setShowNearbyRadius,
-        showAnimalMarkers, setShowAnimalMarkers
+        showAnimalMarkers, setShowAnimalMarkers,
+        historicalMode, setHistoricalMode,
+        historicalDateRange, setHistoricalDateRange
     } = props;
     
     const mapRef = useRef<MapView>(null);
@@ -356,6 +366,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     
     // Navigation & Loading State
     const [isNavLoading, setIsNavLoading] = useState(false);
+    useEffect(() => {
+        if (isRouteLoading) {
+            setIsNavLoading(true);
+        } else {
+            // Add a small delay for smoother transition after loading
+            const timer = setTimeout(() => setIsNavLoading(false), 500);
+            return () => clearTimeout(timer);
+        }
+    }, [isRouteLoading]);
+    
     const bottomSheetTranslateY = useRef(new Animated.Value(300)).current;
 
     
@@ -400,6 +420,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Stable derived state
     const filteredPredictions = useMemo(() => {
         if (!Array.isArray(predictions)) return [];
+        if (!visibleAnimals || typeof visibleAnimals !== 'object') return predictions;
         return predictions.filter(p => visibleAnimals[p.scientific] !== false);
     }, [predictions, visibleAnimals]);
 
@@ -417,20 +438,29 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     
     const animalTypes = useMemo(() => Object.keys(ANIMALS), []);
 
+    const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
+
+    const handleHistoricalPreset = (days: number) => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - days);
+        setHistoricalDateRange({
+            startDate: start.toISOString().split('T')[0],
+            endDate: end.toISOString().split('T')[0]
+        });
+    };
+
     const processedSafePlaces = useMemo(() => {
-        if (!Array.isArray(safePlaces)) return [];
-        const base = safePlaces.filter(p => p.lat && p.lon);
-        if (isNavigating && safeRoute?.path) {
-            return base.filter(p => {
-                const dist = calculateMinDistanceToPolyline(
-                    { lat: Number(p.lat), lon: Number(p.lon) },
-                    safeRoute.path
-                );
-                return dist <= 5;
-            });
+        if (!Array.isArray(safePlaces) || safePlaces.length === 0) return [];
+        
+        // If a route is active, ONLY show safe places (already filtered to 3km in service)
+        if (safeRoute?.path && safeRoute.path.length > 0) {
+            return safePlaces.filter(p => p.lat && p.lon);
         }
-        return base;
-    }, [safePlaces, safeRoute, isNavigating]);
+        
+        // Hide global safe places when no route is active (per goal)
+        return [];
+    }, [safePlaces, safeRoute?.path]);
 
     const safePredictedPath = useMemo(() => {
         if (!Array.isArray(predictedPath)) return [];
@@ -588,20 +618,44 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Flatten data for markers to ensure stable keys and no undefined access
     const reportMarkers = useMemo(() => (Array.isArray(reports) ? reports : []).filter(r => r.lat && r.lon), [reports]);
     
-    // FIX: Filter animals by visibility toggle AND species filter (using scientific name)
+    useEffect(() => {
+        if (processedSafePlaces.length > 0) {
+            console.log(`[MapView] Rendering ${processedSafePlaces.length} safe places on map.`);
+        }
+    }, [processedSafePlaces]);
+
+    // NEW: Conditional marker logic based on route activity
     const animalMarkers = useMemo(() => {
-        if (!showAnimalMarkers || !recentSightings) return [];
-        return recentSightings.filter(s => 
-            s.lat && 
-            s.lon && 
-            visibleAnimals[s.scientificName] !== false
-        );
-    }, [showAnimalMarkers, recentSightings, visibleAnimals]);
+        if (!showAnimalMarkers) return [];
+
+        // Determine which dataset to use
+        const baseData = (safeRoute?.path && safeRoute.path.length > 0) 
+            ? (riskZones || []) 
+            : (recentSightings || []);
+
+        // Apply species filter (visibleAnimals) and ensure coords exist
+        return baseData.filter(s => {
+            const sci = s.scientificName || s.scientific_name;
+            const lat = s.lat;
+            const lon = s.lon;
+            
+            if (!lat || !lon) return false;
+            
+            // Check species filter
+            if (sci && visibleAnimals[canonicalScientific(String(sci))] === false) {
+                return false;
+            }
+            
+            return true;
+        });
+    }, [showAnimalMarkers, safeRoute?.path, recentSightings, riskZones, visibleAnimals]);
     
     // 🔎 STEP 1 – LOG RAW DATA
-    console.log(`[MapView] Animals visible: ${animalMarkers.length} (showMarkers: ${showAnimalMarkers}, sightings: ${recentSightings?.length})`);
+    const isRouteActive = !!(safeRoute?.path && safeRoute.path.length > 0);
+    console.log(`[MapView] Animals visible: ${animalMarkers.length} (Route Active: ${isRouteActive}, showMarkers: ${showAnimalMarkers})`);
+    console.log(`[MapView] Safe Places visible: ${processedSafePlaces.length} (Total raw: ${safePlaces?.length || 0})`);
     if (riskZones && riskZones.length > 0) {
-        console.log(`[MapView] Rendering ${riskZones.length} risk zones on route.`);
+        console.log(`[MapView] Found ${riskZones.length} risk zones for current route.`);
     }
 
     // FIX: Offset risk markers so they appear next to the animal
@@ -625,7 +679,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     {/* 1. RISK CIRCLES (Bottom Layer) */}
                     {showAnimalMarkers && riskZones.map((zone, index) => (
                         <Circle
-                            key={`risk-circle-${zone.id || index}-${index}`}
+                            key={`risk-circle-idx-${index}-${zone.id || 'no-id'}`}
                             center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
                             radius={2000}
                             fillColor="rgba(255, 0, 0, 0.12)"
@@ -672,42 +726,49 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     )}
 
                     {/* 3. SAFE PLACES (Modern Badge) */}
-                    {processedSafePlaces.map((place, index) => (
-                        <Marker
-                            key={`safe-${place.id || index}-${index}`}
-                            coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
-                            zIndex={3}
-                            anchor={{ x: 0.5, y: 0.5 }}
-                            title={place.name || 'Safe Place'}
-                            description={place.address || ''}
-                        >
-                            <View style={styles.safeBadge}>
-                                <Text style={{ fontSize: 20 }}>{place.type === 'police' ? '👮' : '🛡️'}</Text>
-                            </View>
-                        </Marker>
-                    ))}
+                    {processedSafePlaces.map((place, index) => {
+                        let emoji = '🌲'; // Default Forest Office
+                        if (place.type === 'police') emoji = '👮';
+                        
+                        return (
+                            <Marker
+                                key={`safe-idx-${index}-${place.id || 'no-id'}`}
+                                coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
+                                zIndex={3}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                title={place.name || 'Safe Place'}
+                                description={place.address || ''}
+                            >
+                                <View style={styles.safeBadge}>
+                                    <Text style={styles.safeEmoji}>{emoji}</Text>
+                                </View>
+                            </Marker>
+                        );
+                    })}
 
                     {/* 4. ANIMAL & RISK MARKERS */}
                     {animalMarkers.map((sighting, index) => {
-                        let emoji = sighting.emoji || sighting.emojji;
-                        if (!emoji && sighting.scientificName) {
-                            const sci = canonicalScientific(String(sighting.scientificName));
-                            const entry = ANIMALS[sci];
-                            if (entry) emoji = entry.emoji;
-                        }
-                        if (!emoji || !sighting.lat || !sighting.lon) return null;
+                        const sci = sighting.scientificName || sighting.scientific_name;
+                        const sciCanon = sci ? canonicalScientific(String(sci)) : '';
+                        const animalInfo = ANIMALS[sciCanon];
+                        
+                        let emoji = sighting.emoji || sighting.emojji || animalInfo?.emoji || '🐾';
+                        const name = sighting.name || animalInfo?.common || 'Animal';
+                        const date = sighting.date || sighting.eventDate;
+
+                        if (!sighting.lat || !sighting.lon) return null;
 
                         return (
                             <Marker
-                                key={`sighting-${sighting.id || index}`}
+                                key={`sighting-idx-${index}-${sighting.id || 'no-id'}`}
                                 coordinate={{ latitude: Number(sighting.lat), longitude: Number(sighting.lon) }}
                                 zIndex={4}
                                 onPress={() => {
                                     setSelectedAnimal({
-                                        name: sighting.name,
-                                        scientificName: sighting.scientificName,
+                                        name: name,
+                                        scientificName: sci,
                                         image_url: sighting.image_url,
-                                        date: sighting.date,
+                                        date: date,
                                         metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' },
                                         lat: Number(sighting.lat),
                                         lon: Number(sighting.lon),
@@ -716,53 +777,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                     setUiMode(UIMode.DETAIL);
                                 }}
                             >
-                                <View style={styles.markerContainer}>
+                                <View style={[styles.markerContainer, (historicalMode && !safeRoute) && styles.historicalMarker]}>
                                     <Text style={{ fontSize: isNavigating ? 24 : 30, textAlign: 'center' }}>{emoji}</Text>
-                                </View>
-                            </Marker>
-                        );
-                    })}
-
-                    {showAnimalMarkers && riskZones.filter(z => z.lat && z.lon).map((zone, index) => {
-                        let emoji = '🐾';
-                        let commonName: string | undefined = undefined;
-                        if (zone.scientific_name) {
-                            const sci = canonicalScientific(String(zone.scientific_name));
-                            const entry = ANIMALS[sci];
-                            if (entry) {
-                                emoji = entry.emoji;
-                                commonName = entry.common;
-                            }
-                        }
-                        if (!commonName && zone.name) {
-                            const entry = Object.values(ANIMALS).find(a => a.common === zone.name);
-                            if (entry) {
-                                emoji = entry.emoji;
-                                commonName = entry.common;
-                            } else {
-                                commonName = zone.name;
-                            }
-                        }
-                        return (
-                            <Marker
-                                key={`risk-emoji-${zone.id || index}-${index}`}
-                                coordinate={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
-                                zIndex={4}
-                                onPress={() => {
-                                    setSelectedAnimal({
-                                        name: commonName || 'Animal',
-                                        image_url: zone.image_url,
-                                        date: zone.eventDate,
-                                        metadata: zone.metadata || { scope: 'regional', confidence: 'medium' },
-                                        lat: Number(zone.lat),
-                                        lon: Number(zone.lon),
-                                        address: zone.address
-                                    });
-                                    setUiMode(UIMode.DETAIL);
-                                }}
-                            >
-                                <View style={styles.markerContainer}>
-                                    <Text style={{ fontSize: 28, textAlign: 'center' }}>{emoji}</Text>
+                                    {(historicalMode && !safeRoute) && (
+                                        <View style={styles.historicalIndicator}>
+                                            <SyncIcon width={10} height={10} color="#ffffff" />
+                                        </View>
+                                    )}
                                 </View>
                             </Marker>
                         );
@@ -816,7 +837,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
                     {!isNavigating && (
                         <>
-                            {showAnimalMarkers && reportMarkers.map(r => {
+                            {showAnimalMarkers && reportMarkers.map((r, index) => {
                                 let emoji = '🐾';
                                 const name = r.wildlifeType || r.ai?.common;
                                 if (name) {
@@ -825,7 +846,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 }
                                 return (
                                     <Marker
-                                        key={`report-${r.id}`}
+                                        key={`report-idx-${index}-${r.id || 'no-id'}`}
                                         coordinate={{ latitude: Number(r.lat), longitude: Number(r.lon) }}
                                         title={name || 'Report'}
                                         description={r.location}
@@ -852,9 +873,9 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
                             {(showPredictions ? filteredPredictions : [])
                                 .filter(p => Array.isArray(p.fullPath) && p.fullPath.length >= 2)
-                                .map(p => (
+                                .map((p, index) => (
                                     <Polyline
-                                        key={`auto-path-${p.id}`}
+                                        key={`auto-path-idx-${index}-${p.id || 'no-id'}`}
                                         coordinates={p.fullPath!.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))}
                                         strokeColor={p.color || '#F59E0B'}
                                         strokeWidth={3}
@@ -947,11 +968,23 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     <View style={[styles.riskContainer, { bottom: bottomPadding + 80 }]}>
                         <View style={styles.riskPill}>
                             <AlertTriangleIcon width={18} height={18} color="#ef4444" />
-                            <Text style={styles.riskText}>{safeRoute && riskZones ? riskZones.length : filteredPredictions.length} Risks</Text>
+                            <Text style={styles.riskText}>{safeRoute && Array.isArray(riskZones) ? riskZones.length : filteredPredictions.length} Risks</Text>
                             <View style={styles.divider} />
-                            <Text style={{ fontSize: 18 }}>👮‍♂️</Text>
-                            <Text style={styles.safeText}>{safeRoute ? safePlaces.length : 0} Safe</Text>
+                            <Text style={{ fontSize: 18 }}>👮</Text>
+                            <Text style={styles.safeText}>{safeRoute && Array.isArray(processedSafePlaces) ? processedSafePlaces.length : 0} Safe</Text>
                         </View>
+                    </View>
+                )}
+
+                {historicalMode && !safeRoute && (
+                    <View style={styles.historicalBanner}>
+                        <SyncIcon width={16} height={16} color="#ffffff" />
+                        <Text style={styles.historicalBannerText}>
+                            Viewing Historical Data ({historicalDateRange?.startDate || '...'})
+                        </Text>
+                        <Text style={styles.historicalBannerWarning}>
+                            Analysis only. Not for real-time safety.
+                        </Text>
                     </View>
                 )}
 
@@ -1075,8 +1108,92 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                         />
                                     </View>
                                 ))}
+                                
+                                <View style={styles.divider} />
+                                
+                                <View style={styles.filterRow}>
+                                    <View>
+                                        <Text style={styles.filterLabel}>Historical Mode</Text>
+                                        <Text style={styles.filterSubLabel}>Analyze past wildlife patterns</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggle, historicalMode && styles.toggleActive]}
+                                        onPress={() => {
+                                            setHistoricalMode(!historicalMode);
+                                            if (!historicalMode) setIsDatePickerVisible(true);
+                                        }}
+                                    />
+                                </View>
+
+                                {historicalMode && (
+                                    <View style={styles.dateRangeContainer}>
+                                        <Text style={styles.dateRangeTitle}>Selected Range:</Text>
+                                        <Text style={styles.dateRangeValue}>
+                                            {historicalDateRange ? `${historicalDateRange.startDate} to ${historicalDateRange.endDate}` : 'Last 30 days (default)'}
+                                        </Text>
+                                        <TouchableOpacity 
+                                            style={styles.changeDateButton}
+                                            onPress={() => setIsDatePickerVisible(true)}
+                                        >
+                                            <Text style={styles.changeDateText}>Change Date Range</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
                             </ScrollView>
                         </Pressable>
+                    </Pressable>
+                </Modal>
+            )}
+
+            {isDatePickerVisible && (
+                <Modal visible={isDatePickerVisible} transparent animationType="fade">
+                    <Pressable style={styles.modalOverlay} onPress={() => setIsDatePickerVisible(false)}>
+                        <View style={styles.datePickerContent}>
+                            <Text style={styles.datePickerTitle}>Historical Data Range</Text>
+                            
+                            <View style={styles.presetGrid}>
+                                {[7, 30, 90, 180].map(days => (
+                                    <TouchableOpacity 
+                                        key={days}
+                                        style={styles.presetButton}
+                                        onPress={() => {
+                                            handleHistoricalPreset(days);
+                                            setIsDatePickerVisible(false);
+                                        }}
+                                    >
+                                        <Text style={styles.presetText}>Last {days} Days</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <View style={styles.customDateInputs}>
+                                <View style={styles.dateInputBox}>
+                                    <Text style={styles.dateInputLabel}>Start (YYYY-MM-DD)</Text>
+                                    <TextInput 
+                                        style={styles.dateInput}
+                                        placeholder="2024-01-01"
+                                        defaultValue={historicalDateRange?.startDate}
+                                        onChangeText={(t) => setHistoricalDateRange((prev: { startDate: string; endDate: string } | null) => ({ ...prev!, startDate: t }))}
+                                    />
+                                </View>
+                                <View style={styles.dateInputBox}>
+                                    <Text style={styles.dateInputLabel}>End (YYYY-MM-DD)</Text>
+                                    <TextInput 
+                                        style={styles.dateInput}
+                                        placeholder="2024-02-01"
+                                        defaultValue={historicalDateRange?.endDate}
+                                        onChangeText={(t) => setHistoricalDateRange((prev: { startDate: string; endDate: string } | null) => ({ ...prev!, endDate: t }))}
+                                    />
+                                </View>
+                            </View>
+
+                            <TouchableOpacity 
+                                style={styles.applyDateButton}
+                                onPress={() => setIsDatePickerVisible(false)}
+                            >
+                                <Text style={styles.applyDateText}>Apply Range</Text>
+                            </TouchableOpacity>
+                        </View>
                     </Pressable>
                 </Modal>
             )}
@@ -1213,6 +1330,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                 isSuggesting={isSuggesting}
                                 onFetchSuggestions={onFetchSuggestions}
                                 onClearSuggestions={onClearSuggestions}
+                                searchError={searchError}
                                 getCurrentLocation={getCurrentLocation}
                                 nearbyRadiusKm={nearbyRadiusKm}
                                 isLocationLoading={isLocationLoading}
@@ -1389,6 +1507,144 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    historicalMarker: {
+        opacity: 0.7,
+    },
+    historicalIndicator: {
+        position: 'absolute',
+        bottom: -2,
+        right: -2,
+        backgroundColor: '#6366f1',
+        borderRadius: 8,
+        padding: 2,
+        borderWidth: 1,
+        borderColor: '#ffffff',
+    },
+    historicalBanner: {
+        position: 'absolute',
+        top: 100,
+        left: 20,
+        right: 20,
+        backgroundColor: 'rgba(99, 102, 241, 0.95)',
+        padding: 12,
+        borderRadius: 12,
+        flexDirection: 'column',
+        alignItems: 'center',
+        zIndex: 100,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    historicalBannerText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    historicalBannerWarning: {
+        color: 'rgba(255, 255, 255, 0.8)',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    filterSubLabel: {
+        fontSize: 12,
+        color: '#6b7280',
+    },
+    dateRangeContainer: {
+        padding: 12,
+        backgroundColor: '#f3f4f6',
+        borderRadius: 8,
+        marginTop: 8,
+    },
+    dateRangeTitle: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: '#374151',
+    },
+    dateRangeValue: {
+        fontSize: 14,
+        color: '#4b5563',
+        marginTop: 4,
+    },
+    changeDateButton: {
+        marginTop: 8,
+        backgroundColor: '#ffffff',
+        padding: 8,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        alignItems: 'center',
+    },
+    changeDateText: {
+        fontSize: 12,
+        color: '#6366f1',
+        fontWeight: '600',
+    },
+    datePickerContent: {
+        backgroundColor: '#ffffff',
+        width: '85%',
+        borderRadius: 20,
+        padding: 20,
+        alignItems: 'center',
+    },
+    datePickerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#1f2937',
+        marginBottom: 16,
+    },
+    presetGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        justifyContent: 'center',
+        marginBottom: 20,
+    },
+    presetButton: {
+        backgroundColor: '#f3f4f6',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        minWidth: '45%',
+        alignItems: 'center',
+    },
+    presetText: {
+        fontSize: 13,
+        color: '#4b5563',
+    },
+    customDateInputs: {
+        width: '100%',
+        gap: 12,
+        marginBottom: 20,
+    },
+    dateInputBox: {
+        width: '100%',
+    },
+    dateInputLabel: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginBottom: 4,
+    },
+    dateInput: {
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        borderRadius: 8,
+        padding: 10,
+        fontSize: 14,
+    },
+    applyDateButton: {
+        backgroundColor: '#6366f1',
+        width: '100%',
+        padding: 14,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    applyDateText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
     indexCircle: {
         width: 24,
         height: 24,
@@ -1532,19 +1788,20 @@ const styles = StyleSheet.create({
         marginLeft: 8,
     },
     safeBadge: {
-        backgroundColor: '#DCFCE7',
-        padding: 6,
-        borderRadius: 20,
-        shadowColor: '#000',
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        backgroundColor: 'rgba(220, 252, 231, 0.85)', // Soft green badge style
+        padding: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#059669',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 36,
+        minHeight: 36,
     },
     safeEmoji: {
         fontSize: 24,
         textAlign: 'center',
-        textAlignVertical: 'center',
-        includeFontPadding: false,
+        lineHeight: 30, // Added to prevent clipping
     },
     modalOverlay: {
         flex: 1,

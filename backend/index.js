@@ -85,6 +85,20 @@ const ML_PYTHON_EXE = (() => {
 const INAT_PYTHON_EXE = ML_PYTHON_EXE;
 
 // --- Constants ---
+const SOUTH_INDIA_BOUNDS = {
+    minLat: 8.0,
+    maxLat: 15.5,
+    minLon: 74.0,
+    maxLon: 84.0
+};
+
+const isWithinSouthIndia = (lat, lon) => {
+    return lat >= SOUTH_INDIA_BOUNDS.minLat && 
+           lat <= SOUTH_INDIA_BOUNDS.maxLat && 
+           lon >= SOUTH_INDIA_BOUNDS.minLon && 
+           lon <= SOUTH_INDIA_BOUNDS.maxLon;
+};
+
 const SPECIES_CONFIG = {
     "Asian Elephant": { radiusKm: 3.0, taxon_id: 42910 },
     "Tiger": { radiusKm: 2.0, taxon_id: 47367 },
@@ -412,26 +426,34 @@ const getHistoricalData = () => readJsonArray(WILDLIFE_CACHE_PATH);
 
 // ML needs full historical context (2020 -> today).
 // The UI/routing shows only a recent window (default: last 30 days) to reduce clutter and focus on near-term risk.
-const getRecentData = (days = 30) => {
+const getRecentData = (days = 30, startDate = null, endDate = null) => {
     const allData = getHistoricalData();
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
     
-    const recent = allData.filter(item => {
-        if (!item.eventDate || item.eventDate === "Unknown") return false;
-        const d = new Date(item.eventDate);
-        return d >= cutoff;
-    });
-
-    // Fallback: If no data in the last 30 days, return the 50 most recent records from the entire cache
-    if (recent.length === 0 && allData.length > 0) {
-        console.log(`[Wildlife] No data found for the last ${days} days. Falling back to 50 latest records.`);
-        return allData
-            .filter(item => item.eventDate && item.eventDate !== "Unknown")
-            .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
-            .slice(0, 50);
+    let cutoffStart, cutoffEnd;
+    
+    if (startDate && endDate) {
+        cutoffStart = new Date(startDate);
+        cutoffEnd = new Date(endDate);
+        // Ensure end date includes the full day
+        cutoffEnd.setHours(23, 59, 59, 999);
+    } else {
+        cutoffStart = new Date();
+        cutoffStart.setDate(cutoffStart.getDate() - days);
+        cutoffEnd = new Date();
     }
     
+    // Regional Restriction: Filter by South India bounds and date range
+    const recent = allData.filter(item => {
+        if (!item.eventDate || item.eventDate === "Unknown") return false;
+        
+        const lat = parseFloat(item.lat);
+        const lon = parseFloat(item.lon);
+        if (!isWithinSouthIndia(lat, lon)) return false;
+
+        const d = new Date(item.eventDate);
+        return d >= cutoffStart && d <= cutoffEnd;
+    });
+
     return recent;
 };
 
@@ -556,13 +578,15 @@ app.post('/api/predict-animal-paths', (req, res) => {
 // API: Get Recent Data (for UI/Routing)
 app.get('/api/wildlife/recent', (req, res) => {
     const days = req.query.days ? parseInt(req.query.days) : 30;
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
     
     // Trigger fetch if missing
     if (!fs.existsSync(WILDLIFE_CACHE_PATH)) {
         runInatPython();
     }
     
-    const recent = getRecentData(days);
+    const recent = getRecentData(days, startDate, endDate);
     res.json(recent);
 });
 
@@ -572,9 +596,14 @@ app.get('/api/inat/recent', (req, res) => {
 });
 
 
-// --- New: sightings API for useAnimalData hook ---
 app.get('/api/sightings', (req, res) => {
     const { scientificName, lat, lon, radius } = req.query;
+    
+    // Regional Restriction: If the request coordinates are outside South India, return empty
+    if (lat && lon && !isWithinSouthIndia(parseFloat(lat), parseFloat(lon))) {
+        return res.json([]);
+    }
+
     // Use only recent data for map display (default: 30 days)
     const wildlife = getRecentData(30);
     
@@ -611,7 +640,7 @@ app.get('/api/route/osrm', async (req, res) => {
     }
 
     const straightLineRoute = (payload = {}) => {
-        console.log('[Route] TRIGGERED: Straight-line fallback.');
+        console.warn(`[Route] FALLBACK: Routing failed or service unavailable. Returning straight line. Reason: ${payload.error || 'Unknown'}`);
         const distKm = haversineDistanceKm(startLatN, startLonN, endLatN, endLonN);
         let speedKmh = 45;
         if (mode === 'walk') speedKmh = 4;
@@ -650,20 +679,43 @@ app.get('/api/route/osrm', async (req, res) => {
             const eLon = String(endLon).trim();
             const eLat = String(endLat).trim();
 
-            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson`;
+            // Use 'radiuses' parameter to help OSRM snap to nearest road (even if it's 3km away)
+            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson&radiuses=3000;3000`;
             console.log(`[OSRM] Fetching URL: ${url}`);
             
             const response = await axios.get(url, { 
-                timeout: 15000, // Increased timeout to 15s
+                timeout: 20000, // Increased timeout to 20s
                 headers: { 
                     'User-Agent': 'WildlifeSafetyApp/1.0',
                     'Accept': 'application/json'
                 },
-                validateStatus: (status) => status < 500 // Don't throw on 4xx errors
+                validateStatus: (status) => status < 500 
             });
 
             if (response.status !== 200) {
                 console.error(`[OSRM] Request failed with status ${response.status}:`, JSON.stringify(response.data));
+                
+                // Fallback: Try the lz4 mirror if the primary is down/failing
+                if (OSRM_BASE_URL === 'https://router.project-osrm.org') {
+                    console.warn('[OSRM] Trying fallback mirror...');
+                    const fallbackUrl = `https://lz4.overpass-api.de/osrm/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson&radiuses=3000;3000`;
+                    try {
+                         const fallbackRes = await axios.get(fallbackUrl, { timeout: 15000 });
+                         if (fallbackRes.data && fallbackRes.data.routes && fallbackRes.data.routes.length > 0) {
+                             console.log('[OSRM] Success using fallback mirror!');
+                             const route = fallbackRes.data.routes[0];
+                             return {
+                                geometry: route.geometry,
+                                distance: route.distance,
+                                duration: route.duration,
+                                status: 'success',
+                                source: 'osrm_fallback'
+                             };
+                         }
+                    } catch (e) {
+                         console.error('[OSRM] Fallback mirror failed too.');
+                    }
+                }
                 return { status: 'failed', error: `HTTP ${response.status}` };
             }
 

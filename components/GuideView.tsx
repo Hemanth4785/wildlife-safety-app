@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, NativeModules, Image } from 'react-native';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getAIGuideResponse, searchLocations, getRoute, getAnimalsNearRoute, findSafePlacesAlongRoute, fetchRecentWildlife, findSafePlacesNear } from '../services/apiService';
+import { searchLocations, getRoute, getAnimalsNearRoute, findSafePlacesAlongRoute, fetchRecentWildlife, findSafePlacesNear } from '../services/apiService';
 import { ANIMALS } from '../constants';
 import type { ChatMessage } from '../types';
 import { PaperPlaneIcon, SpinnerIcon, MicIcon, ChatIcon, AlertTriangleIcon } from './icons';
@@ -27,7 +27,6 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
     const [voiceAvailable, setVoiceAvailable] = useState(false);
     const scrollViewRef = useRef<ScrollView>(null);
     const [pendingOrigin, setPendingOrigin] = useState<string | null>(null);
-    const [pendingDest, setPendingDest] = useState<string | null>(null);
 
     const scrollToBottom = () => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -73,7 +72,7 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
         const base = (Constants.expoConfig?.extra as any)?.API_BASE_URL;
         if (!base) return direct;
         try {
-            const u = new URL(direct);
+            new URL(direct);
             return `${base}/api/proxy-image?u=${encodeURIComponent(direct)}`;
         } catch {
             return direct;
@@ -121,34 +120,38 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                 produced = true;
             } else
             if (lower.includes('safe place') || lower.includes('safety place') || lower.includes('safe places') || lower.includes('safety places') || lower.includes('police') || lower.includes('forest office') || lower.includes('ranger')) {
-                const locs = await searchLocations(trimmedInput);
-                const p = locs[0];
-                if (p) {
-                    const prefs = parsePlacePrefs(trimmedInput);
-                    const safePlaces = await findSafePlacesNear(p.lat, p.lon, 10);
-                    const police = (safePlaces || []).filter(s => s.type === 'police').slice(0, prefs.policeCount);
-                    const ranger = (safePlaces || []).filter(s => s.type !== 'police').slice(0, prefs.forestCount);
-                    const policeNames = police.map(s => s.name).filter(Boolean);
-                    const rangerNames = ranger.map(s => s.name).filter(Boolean);
-                    const summary = prefs.order === 'police'
-                        ? `Safety areas near ${p.name} — Police: ${policeNames.join(', ') || 'None'} | Forest: ${rangerNames.join(', ') || 'None'}.`
-                        : `Safety areas near ${p.name} — Forest: ${rangerNames.join(', ') || 'None'} | Police: ${policeNames.join(', ') || 'None'}.`;
-                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: summary }]);
-                    produced = true;
-                } else {
-                    const ask = `Please mention the location to list safety areas. Example: “Share safety places in Kotagiri”.`;
-                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: ask }]);
+                try {
+                    const locs = await searchLocations(trimmedInput);
+                    const p = locs[0];
+                    if (p) {
+                        const prefs = parsePlacePrefs(trimmedInput);
+                        const safePlaces = await findSafePlacesNear(p.lat, p.lon, 10);
+                        const police = (safePlaces || []).filter(s => s.type === 'police').slice(0, prefs.policeCount);
+                        const ranger = (safePlaces || []).filter(s => s.type !== 'police').slice(0, prefs.forestCount);
+                        const policeNames = police.map(s => s.name).filter(Boolean);
+                        const rangerNames = ranger.map(s => s.name).filter(Boolean);
+                        const summary = prefs.order === 'police'
+                            ? `Safety areas near ${p.name} — Police: ${policeNames.join(', ') || 'None'} | Forest: ${rangerNames.join(', ') || 'None'}.`
+                            : `Safety areas near ${p.name} — Forest: ${rangerNames.join(', ') || 'None'} | Police: ${policeNames.join(', ') || 'None'}.`;
+                        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: summary }]);
+                        produced = true;
+                    } else {
+                        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `Please mention the location to list safety areas. Example: “Share safety places in Kotagiri”.` }]);
+                        produced = true;
+                    }
+                } catch (err) {
+                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: "Location search is currently unavailable. Please try again later." }]);
                     produced = true;
                 }
             } else
             if (rq.origin && rq.dest) {
-                const origins = await searchLocations(rq.origin);
-                const dests = await searchLocations(rq.dest);
-                const o = origins[0];
-                const d = dests[0];
+                try {
+                    const origins = await searchLocations(rq.origin);
+                    const dests = await searchLocations(rq.dest);
+                    const o = origins[0];
+                    const d = dests[0];
                     if (o && d) {
                     setPendingOrigin(null);
-                    setPendingDest(null);
                     const route = await getRoute({ lat: o.lat, lon: o.lon, name: o.name }, { lat: d.lat, lon: d.lon, name: d.name });
                     if (route && route.path.length > 0) {
                         const ar = await getAnimalsNearRoute(route.path);
@@ -187,18 +190,25 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                             }
                         setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__ROUTE_LINK__|${o.name}|${d.name}` }]);
                         produced = true;
+                    } else {
+                        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `Could not find one of the locations: ${!o ? rq.origin : rq.dest}.` }]);
+                        produced = true;
                     }
+                    }
+                } catch (err) {
+                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: "Location search is currently unavailable. Please try again later." }]);
+                    produced = true;
                 }
             } else if (!rq.origin && destOnlyMatch && !rq.dest) {
                 const destText = destOnlyMatch[1].trim();
-                const locs = await searchLocations(destText);
-                const d = locs[0];
-                if (d) {
-                    setPendingDest(destText);
-                    if (pendingOrigin) {
-                        const origins = await searchLocations(pendingOrigin);
-                        const o = origins[0];
-                        if (o) {
+                try {
+                    const locs = await searchLocations(destText);
+                    const d = locs[0];
+                    if (d) {
+                        if (pendingOrigin) {
+                            const origins = await searchLocations(pendingOrigin);
+                            const o = origins[0];
+                            if (o) {
                             const route = await getRoute({ lat: o.lat, lon: o.lon, name: o.name }, { lat: d.lat, lon: d.lon, name: d.name });
                             if (route && route.path.length > 0) {
                                 const ar = await getAnimalsNearRoute(route.path);
@@ -237,7 +247,6 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                                 }
                                 setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__ROUTE_LINK__|${o.name}|${d.name}` }]);
                                 setPendingOrigin(null);
-                                setPendingDest(null);
                                 produced = true;
                             }
                         }
@@ -260,6 +269,12 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                     setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: ask }]);
                     produced = true;
                 }
+                }
+                catch (err: any) {
+                    console.error("Location search failed:", err);
+                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: "Location search is currently unavailable. Please try again later." }]);
+                    produced = true;
+                }
             } else if ((lower.includes('route') || lower.includes('plan') || lower.includes('navigate') || lower.includes('directions')) && !(rq.origin && rq.dest)) {
                 const ask = `Please tell your current address and destination to plan safety and show nearby animal sightings for both.`;
                 setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: ask }]);
@@ -270,34 +285,42 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                 setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: ask }]);
                 produced = true;
             } else if (lower.includes('nearby') || lower.includes('area') || lower.includes('animals in ') || lower.includes('wildlife in ')) {
-                const locs = await searchLocations(trimmedInput);
-                const p = locs[0];
-                if (p) {
-                    const recents = await fetchRecentWildlife();
-                    const near = recents.filter((r: any) => toKm({ lat: p.lat, lon: p.lon }, { lat: r.lat, lon: r.lon }) <= 25);
-                    const species = Array.from(new Set(near.map((n: any) => n.name)));
-                    const safePlaces = await findSafePlacesNear(p.lat, p.lon, 5);
-                    const detour = species.some(s => s.toLowerCase().includes('elephant') || s.toLowerCase().includes('tiger'))
-                        ? 'Avoid dense forest edges; prefer main roads with lighting.'
-                        : 'Use well-used paths; avoid thick brush and isolated trails.';
-                    const timeGuidance = 'Prefer daylight; avoid dawn/dusk near forest edges; postpone after heavy rain.';
-                    const summary = [
-                        `Area: ${p.name}`,
-                        `Animals: ${species.join(', ') || 'None'} within 25 km`,
-                        `Safety Areas: ${safePlaces.slice(0,5).map(s => s.name).join(', ') || 'None found'}`,
-                        `Detour Suggestion: ${detour}`,
-                        `Time-of-Day Guidance: ${timeGuidance}`
-                    ].join('\\n');
-                    contextMessages = [...contextMessages, { role: 'model', text: summary }];
-                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: summary }]);
-                    const seen = new Set<string>();
-                    for (const r of near) {
-                        const key = String(r.name).toLowerCase();
-                        if (seen.has(key)) continue;
-                        seen.add(key);
-                        const img = getImageUrl(r);
-                        if (img) setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__IMG__|${img}|${r.name}|${r.address || p.name}` }]);
+                try {
+                    const locs = await searchLocations(trimmedInput);
+                    const p = locs[0];
+                    if (p) {
+                        const recents = await fetchRecentWildlife();
+                        const near = recents.filter((r: any) => toKm({ lat: p.lat, lon: p.lon }, { lat: r.lat, lon: r.lon }) <= 25);
+                        const species = Array.from(new Set(near.map((n: any) => n.name)));
+                        const safePlaces = await findSafePlacesNear(p.lat, p.lon, 5);
+                        const detour = species.some(s => s.toLowerCase().includes('elephant') || s.toLowerCase().includes('tiger'))
+                            ? 'Avoid dense forest edges; prefer main roads with lighting.'
+                            : 'Use well-used paths; avoid thick brush and isolated trails.';
+                        const timeGuidance = 'Prefer daylight; avoid dawn/dusk near forest edges; postpone after heavy rain.';
+                        const summary = [
+                            `Area: ${p.name}`,
+                            `Animals: ${species.join(', ') || 'None'} within 25 km`,
+                            `Safety Areas: ${safePlaces.slice(0,5).map(s => s.name).join(', ') || 'None found'}`,
+                            `Detour Suggestion: ${detour}`,
+                            `Time-of-Day Guidance: ${timeGuidance}`
+                        ].join('\n');
+                        contextMessages = [...contextMessages, { role: 'model', text: summary }];
+                        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: summary }]);
+                        const seen = new Set<string>();
+                        for (const r of near) {
+                            const key = String(r.name).toLowerCase();
+                            if (seen.has(key)) continue;
+                            seen.add(key);
+                            const img = getImageUrl(r);
+                            if (img) setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `__IMG__|${img}|${r.name}|${r.address || p.name}` }]);
+                        }
+                        produced = true;
+                    } else {
+                        setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: `Could not find location: ${trimmedInput}.` }]);
+                        produced = true;
                     }
+                } catch (err) {
+                    setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: "Location search is currently unavailable. Please try again later." }]);
                     produced = true;
                 }
             } else if (!rq.origin && !rq.dest && !isGreeting && trimmedInput.replace(/\s+/g, '').length >= 3) {
@@ -474,7 +497,7 @@ const GuideView: React.FC<GuideViewProps> = ({ onOpenRouteLink }) => {
                 setMessages((prev: ChatMessage[]) => [...prev, { role: 'model', text: 'Voice input error.' }]);
             });
             await ExpoSpeechRecognitionModule.start({
-                lang: Localization.locale || 'en-US',
+                lang: Localization.getLocales()?.[0]?.languageTag || 'en-US',
                 interimResults: true,
                 continuous: false
             });

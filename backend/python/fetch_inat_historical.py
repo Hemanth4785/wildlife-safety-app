@@ -29,11 +29,11 @@ SPECIES = {
     "41651": {"name": "Sloth Bear", "scientific": "Melursus ursinus", "emoji": "🐻"},
 }
 
-# Geographic Center (Western Ghats, South India)
+# Geographic Center (Covering South India: Nilgiris, Western Ghats, Wayanad, etc.)
 CENTER = {
-    "lat": 12.5,
+    "lat": 11.5,
     "lng": 76.5,
-    "radius": 500, # km
+    "radius": 300, # km radius around the center
 }
 
 # ---------------- HELPERS ---------------- #

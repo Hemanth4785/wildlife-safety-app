@@ -10,6 +10,20 @@ export const GBIF_LIMIT = 200; // Max results from GBIF API
 export const MAP_CENTER: [number, number] = [11.4102, 76.6950]; // Ooty, India
 export const MAP_ZOOM = 10;
 
+export const SOUTH_INDIA_BOUNDS = {
+    minLat: 8.0,
+    maxLat: 15.5,
+    minLon: 74.0,
+    maxLon: 84.0
+};
+
+export const isWithinSouthIndia = (lat: number, lon: number): boolean => {
+    return lat >= SOUTH_INDIA_BOUNDS.minLat && 
+           lat <= SOUTH_INDIA_BOUNDS.maxLat && 
+           lon >= SOUTH_INDIA_BOUNDS.minLon && 
+           lon <= SOUTH_INDIA_BOUNDS.maxLon;
+};
+
 export const ANIMATION_DURATION_MS = 10000; // 10 seconds for one loop
 export const ANIMATION_STEPS = 100; // Number of steps in the animation
 

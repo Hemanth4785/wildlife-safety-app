@@ -155,7 +155,10 @@ export const formatDistance = (distanceInMeters: number): string => {
 };
 
 // Helper to format duration
-export const formatDuration = (durationInMinutes: number): string => {
+export const formatDuration = (durationInMinutes: number | undefined | null): string => {
+    if (durationInMinutes === undefined || durationInMinutes === null || !Number.isFinite(durationInMinutes)) {
+        return '-- min';
+    }
     const totalMinutes = Math.round(durationInMinutes);
     
     if (totalMinutes < 60) {
@@ -173,24 +176,57 @@ export const formatDuration = (durationInMinutes: number): string => {
 };
 
 // Helper to calculate estimated arrival time
-export const formatArrivalTime = (durationInMinutes: number): string => {
+export const formatArrivalTime = (durationInMinutes: number | undefined | null): string => {
+    if (durationInMinutes === undefined || durationInMinutes === null || !Number.isFinite(durationInMinutes)) {
+        return '--:--';
+    }
     const now = new Date();
     const arrivalTime = new Date(now.getTime() + durationInMinutes * 60000);
+    
+    // Check for invalid date
+    if (isNaN(arrivalTime.getTime())) {
+        return '--:--';
+    }
     
     return arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Helper to calculate minimum distance from a point to a polyline (simplified to closest vertex)
+// Helper to calculate minimum distance from a point to a polyline (optimized)
 export const calculateMinDistanceToPolyline = (point: {lat: number, lon: number}, polyline: [number, number][]): number => {
-    let minDistance = Infinity;
-    // Optimization: Check every Nth point to speed up, or check all if short.
-    // For accuracy we check all vertices.
+    if (!polyline || polyline.length === 0) return Infinity;
+    
+    // Quick bounding box check
+    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
     for (const [lat, lon] of polyline) {
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+    }
+    
+    // If point is far from the route's bbox, exit early (roughly 10km buffer)
+    const buffer = 0.1; 
+    if (point.lat < minLat - buffer || point.lat > maxLat + buffer || 
+        point.lon < minLon - buffer || point.lon > maxLon + buffer) {
+        return 20; // Some large value > threshold
+    }
+
+    let minDistance = Infinity;
+    
+    // Performance optimization: Sampling for long polylines
+    // If route is very long, check every 5th point first to find the general area
+    const step = polyline.length > 200 ? 5 : 1;
+    
+    for (let i = 0; i < polyline.length; i += step) {
+        const [lat, lon] = polyline[i];
         const dist = calculateDistance(point, {lat, lon});
         if (dist < minDistance) {
             minDistance = dist;
+            // Early exit if we are already very close (e.g. within 500m)
+            if (minDistance < 0.5) return minDistance;
         }
     }
+    
     return minDistance; // in km
 };
 

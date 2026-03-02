@@ -22,13 +22,32 @@ import { logger } from '../utils/logger';
  * unauthorized misuse of sensitive wildlife location data.
  */
 
+/**
+ * Helper to perform Auth actions with retry for network errors
+ */
+const withRetry = async <T>(action: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
+  try {
+    return await action();
+  } catch (error: any) {
+    const isNetworkError = error.code === 'auth/network-request-failed' || 
+                           error.message?.toLowerCase().includes('network request failed');
+    
+    if (isNetworkError && retries > 0) {
+      logger.warn(`Auth network failure. Retrying in ${delay}ms... (${retries} left)`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return withRetry(action, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
+
 export const registerUser = async (email: string, password: string, name: string) => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await withRetry(() => createUserWithEmailAndPassword(auth, email, password));
     const user = userCredential.user;
 
     // Create user profile in Firestore
-    await setDoc(doc(db, 'users', user.uid), {
+    await withRetry(() => setDoc(doc(db, 'users', user.uid), {
       name,
       email: user.email,
       created_at: serverTimestamp(),
@@ -37,7 +56,7 @@ export const registerUser = async (email: string, password: string, name: string
       isNewUser: true,
       avatarId: 'tiger',
       nearbyRadiusKm: 5 // Default radius
-    });
+    }));
 
     return { user, error: null };
   } catch (error: any) {
@@ -48,18 +67,18 @@ export const registerUser = async (email: string, password: string, name: string
 
 export const loginUser = async (email: string, password: string) => {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const userCredential = await withRetry(() => signInWithEmailAndPassword(auth, email, password));
     const user = userCredential.user;
 
     // Ensure user document exists (in case of legacy users)
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userDoc = await withRetry(() => getDoc(doc(db, 'users', user.uid)));
     if (!userDoc.exists()) {
-      await setDoc(doc(db, 'users', user.uid), {
+      await withRetry(() => setDoc(doc(db, 'users', user.uid), {
         email: user.email,
         created_at: serverTimestamp(),
         role: 'user',
         uid: user.uid
-      });
+      }));
     }
 
     return { user, error: null };

@@ -618,13 +618,13 @@ interface SafePlaceMarkerProps {
 const SafePlaceMarker: React.FC<SafePlaceMarkerProps> = ({ place, distanceStr, durationStr }) => {
     const icon = useMemo(() => {
         const isPolice = place.type === 'police';
-        const bgColor = isPolice ? 'bg-blue-600' : 'bg-green-700';
-        const svgPath = isPolice ? policeSvgPath : rangerSvgPath;
+        const bgColor = isPolice ? 'bg-blue-100' : 'bg-green-100'; // Soft badge style
+        const borderColor = isPolice ? 'border-blue-600' : 'border-green-600';
+        const emoji = isPolice ? '👮' : '🌲';
+        
         const iconHtml = `
-            <div class="relative flex items-center justify-center w-8 h-8 rounded-full border-2 border-white shadow-lg ${bgColor}">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-white">
-                    ${svgPath}
-                </svg>
+            <div class="relative flex items-center justify-center w-8 h-8 rounded-lg border-2 ${borderColor} shadow-sm ${bgColor}">
+                <span class="text-xl">${emoji}</span>
             </div>
         `;
         return new L.DivIcon({
@@ -903,26 +903,31 @@ const MapView: React.FC<MapViewProps> = (props) => {
     }, [isNavigating, safeRoute, liveLocation, closestPathIndex]);
 
     const processedSafePlaces = useMemo(() => {
-        if (!safeRoute) return safePlaces.map(p => ({ ...p, distanceStr: undefined, durationStr: undefined }));
+        // Requirement: If a route is present, ONLY show safe places ALONG that route.
+        if (safeRoute?.path && safeRoute.path.length > 0) {
+            const placesWithDist = safePlaces.map(place => {
+                const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, safeRoute.path);
+                return { ...place, distKm };
+            });
 
-        const placesWithDist = safePlaces.map(place => {
-            const distKm = calculateMinDistanceToPolyline({lat: place.lat, lon: place.lon}, safeRoute.path);
-            return { ...place, distKm };
-        });
+            // Filter by 3km to match native behavior
+            const filtered = placesWithDist.filter(p => p.distKm <= 3);
 
-        const filtered = placesWithDist.filter(p => p.distKm <= 1);
+            return filtered.map(p => {
+                 const distMeters = p.distKm * 1000;
+                 // Estimate duration: walking 5km/h => 12 min/km
+                 const durationMin = (p.distKm / 5) * 60; 
+                 
+                 return {
+                     ...p,
+                     distanceStr: formatDistance(distMeters),
+                     durationStr: formatDuration(durationMin)
+                 };
+            });
+        }
 
-        return filtered.map(p => {
-             const distMeters = p.distKm * 1000;
-             // Estimate duration: walking 5km/h => 12 min/km
-             const durationMin = (p.distKm / 5) * 60; 
-             
-             return {
-                 ...p,
-                 distanceStr: formatDistance(distMeters),
-                 durationStr: formatDuration(durationMin)
-             };
-        });
+        // If no route is present, show NO safe places (as requested: "according to route ONLY")
+        return [];
     }, [safePlaces, safeRoute]);
 
 

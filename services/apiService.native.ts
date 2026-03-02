@@ -1,17 +1,19 @@
 import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
 import { CONFIG } from '../config';
-import { ANIMALS, canonicalScientific } from '../constants';
+import { ANIMALS, canonicalScientific, isWithinSouthIndia, SOUTH_INDIA_BOUNDS } from '../constants';
 import wildlifeRecent from '../wildlife_recent.json';
+import { calculateMinDistanceToPolyline } from './geoService';
 
 let wildlifeAllCache: any[] | null = null;
 let wildlifeAllCacheAt = 0;
 
 // Helper to get API Base URL
 const getApiBaseUrl = (): string | null => {
+    // Dynamically call the getter to avoid stale values
     const url = CONFIG.API_BASE_URL;
     if (url) {
-        logger.debug(`[API] Using Base URL: ${url}`);
+        // No longer logging every time to avoid clutter
     } else {
         logger.warn('[API] API_BASE_URL is missing!');
     }
@@ -33,7 +35,6 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
     try {
         const response = await fetch(url, options);
         if (!response.ok) {
-            // Requirement: Treat errors as degraded success, never throw
             logger.warn(`API request to ${url} returned status ${response.status}`);
             return { 
                 status: 'degraded', 
@@ -42,7 +43,9 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
                 message: `HTTP Error ${response.status}`
             };
         }
-        return await response.json();
+        const data = await response.json();
+        logger.debug(`[API] Success from ${url.split('?')[0]}`);
+        return data;
     } catch (error: any) {
         const isAbort = error.name === 'AbortError' || error.message?.includes('Aborted');
         
@@ -58,7 +61,6 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
             logger.error(`Critical fetch failure for ${url}`, error);
         }
         
-        // Fallback object instead of throwing
         return { 
             status: 'degraded', 
             error: true, 
@@ -67,24 +69,46 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
     }
 };
 
+// Cache for safe places to avoid redundant Overpass calls
+const safePlacesCache: Record<string, { data: SafePlace[], timestamp: number }> = {};
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 export const findSafePlacesAlongRoute = async (routePath: [number, number][]): Promise<SafePlace[]> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl || routePath.length === 0) return [];
 
-    const buffer = 0.05; // ~5km buffer
+    const buffer = 0.08; // Increased buffer to ~9km to catch more places
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
     routePath.forEach(([lat, lon]) => {
-        minLat = Math.min(minLat, lat);
-        maxLat = Math.max(maxLat, lat);
-        minLon = Math.min(minLon, lon);
-        maxLon = Math.max(maxLon, lon);
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
     });
 
-    const bbox = `${minLat - buffer},${minLon - buffer},${maxLat + buffer},${maxLon + buffer}`;
+    // Regional Constraint: Restrict bounding box to South India
+    const finalMinLat = Math.max(SOUTH_INDIA_BOUNDS.minLat, minLat - buffer);
+    const finalMaxLat = Math.min(SOUTH_INDIA_BOUNDS.maxLat, maxLat + buffer);
+    const finalMinLon = Math.max(SOUTH_INDIA_BOUNDS.minLon, minLon - buffer);
+    const finalMaxLon = Math.min(SOUTH_INDIA_BOUNDS.maxLon, maxLon + buffer);
 
-    // Increased Overpass QL timeout to 60s
+    if (finalMinLat >= finalMaxLat || finalMinLon >= finalMaxLon) {
+        logger.warn("[SafePlaces] Route is outside South India bounds.");
+        return [];
+    }
+
+    const bbox = `${finalMinLat.toFixed(3)},${finalMinLon.toFixed(3)},${finalMaxLat.toFixed(3)},${finalMaxLon.toFixed(3)}`;
+    
+    // Check cache
+    const now = Date.now();
+    if (safePlacesCache[bbox] && (now - safePlacesCache[bbox].timestamp < CACHE_TTL)) {
+        logger.debug(`[SafePlaces] Returning cached results for bbox: ${bbox}`);
+        return safePlacesCache[bbox].data;
+    }
+
+    // Updated Overpass query: ONLY Police Stations and Forest Offices
     const query = `
-        [out:json][timeout:60];
+        [out:json][timeout:30];
         (
           node["amenity"="police"](${bbox});
           way["amenity"="police"](${bbox});
@@ -98,30 +122,52 @@ export const findSafePlacesAlongRoute = async (routePath: [number, number][]): P
     try {
         const data = await nativeFetch(url);
         if (data && data.elements) {
+            const SAFE_PLACE_ROUTE_RADIUS_KM = 3; // 3km = 3000m
+            
             const items = data.elements.map((el: any): SafePlace => {
                 const center = el.center || { lat: el.lat, lon: el.lon };
                 const tags = el.tags || {};
-                const type = tags.amenity === 'police' ? 'police' : 'ranger';
+                
+                let type: 'police' | 'ranger' = 'ranger';
+                if (tags.amenity === 'police') type = 'police';
+                else if (tags.office === 'forestry') type = 'ranger'; // Using ranger as internal key for forestry
+
                 return {
                     id: el.id,
                     lat: center.lat,
                     lon: center.lon,
                     type: type,
-                    name: tags.name || (type === 'police' ? 'Police Station' : 'Forest Office'),
+                    name: tags.name || (
+                        type === 'police' ? 'Police Station' : 'Forest Office'
+                    ),
                     contact: tags.phone || tags['contact:phone'] || tags.operator || tags.website,
                     address: tags['addr:street'] ? `${tags['addr:street']} ${tags['addr:housenumber'] || ''}`.trim() : undefined,
                 };
-            }).filter((p: SafePlace) => p.lat && p.lon);
-            const priority = (t: string) => (t === 'police' ? 0 : 1);
+            }).filter((p: SafePlace) => {
+                if (!p.lat || !p.lon) return false;
+                
+                // Proximity Filter: Only return safe places within 3km of the route
+                const distToRoute = calculateMinDistanceToPolyline({ lat: p.lat, lon: p.lon }, routePath);
+                return distToRoute <= SAFE_PLACE_ROUTE_RADIUS_KM;
+            });
+            
+            logger.info(`[SafePlaces] Found ${items.length} safe locations near route (3km radius).`);
+            console.log("Safe places near route:", items.length);
+            
+            const priorityMap: Record<string, number> = { 'police': 0, 'ranger': 1 };
             const centerPoint = { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
-            return items.sort((a: SafePlace, b: SafePlace) => {
-                const pa = priority(a.type);
-                const pb = priority(b.type);
+            const sorted = items.sort((a: SafePlace, b: SafePlace) => {
+                const pa = priorityMap[a.type] || 99;
+                const pb = priorityMap[b.type] || 99;
                 if (pa !== pb) return pa - pb;
                 const da = distKm(centerPoint, { lat: a.lat, lon: a.lon });
                 const db = distKm(centerPoint, { lat: b.lat, lon: b.lon });
                 return da - db;
             });
+
+            // Cache the result
+            safePlacesCache[bbox] = { data: sorted, timestamp: now };
+            return sorted;
         }
         return [];
     } catch (error: any) {
@@ -129,7 +175,6 @@ export const findSafePlacesAlongRoute = async (routePath: [number, number][]): P
             message: error.message,
             url: url
         });
-        // Return empty array instead of throwing to prevent app crash/stuck state
         return [];
     }
 };
@@ -143,6 +188,8 @@ export const findSafePlacesNear = async (lat: number, lon: number, radiusKm: num
     const minLon = lon - buffer;
     const maxLon = lon + buffer;
     const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
+    
+    // Consistent with along-route search: ONLY Police and Forestry
     const query = `
         [out:json][timeout:60];
         (
@@ -160,16 +207,29 @@ export const findSafePlacesNear = async (lat: number, lon: number, radiusKm: num
             const items = data.elements.map((el: any): SafePlace => {
                 const center = el.center || { lat: el.lat, lon: el.lon };
                 const tags = el.tags || {};
-                const type = tags.amenity === 'police' ? 'police' : 'ranger';
+                
+                let type: 'police' | 'ranger' = 'ranger';
+                if (tags.amenity === 'police') type = 'police';
+                else if (tags.office === 'forestry') type = 'ranger';
+
                 return {
                     id: el.id,
                     lat: center.lat,
                     lon: center.lon,
                     type: type,
-                    name: tags.name || (type === 'police' ? 'Police Station' : 'Forest Office'),
+                    name: tags.name || (
+                        type === 'police' ? 'Police Station' : 'Forest Office'
+                    ),
                 };
             }).filter((p: SafePlace) => p.lat && p.lon);
-            const priority = (t: string) => (t === 'police' ? 0 : 1);
+            
+            logger.info(`[SafePlaces] Found ${items.length} safe locations near user.`);
+            
+            const priority = (t: string) => {
+                if (t === 'police') return 0;
+                if (t === 'ranger') return 1;
+                return 2;
+            };
             const origin = { lat, lon };
             return items.sort((a: SafePlace, b: SafePlace) => {
                 const pa = priority(a.type);
@@ -215,12 +275,11 @@ export const getRainViewerTimestamps = async (): Promise<any> => {
 
     const url = `${baseUrl}/api/rainviewer`;
     try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`RainViewer API failed with status ${response.status}`);
+        const data = await nativeFetch(url);
+        if (data && data.status !== 'degraded') {
+            return data;
         }
-        const data = await response.json();
-        return data;
+        return null;
     } catch (error) {
         logger.error("Failed to fetch RainViewer timestamps", error);
         return null;
@@ -255,32 +314,27 @@ export const checkBackendHealth = async (): Promise<boolean> => {
 
 export const searchLocations = async (query: string): Promise<Location[]> => {
     const baseUrl = getApiBaseUrl();
-    const url = baseUrl ? `${baseUrl}/api/search-locations?q=${encodeURIComponent(query)}` : '';
+    if (!baseUrl) {
+        throw new Error("API_BASE_URL is not configured.");
+    }
+
+    const url = `${baseUrl}/api/search-locations?q=${encodeURIComponent(query)}`;
+    
     try {
-        if (url) {
-            const response = await nativeFetch(url);
-            if (Array.isArray(response)) {
-                return response.map((item: any) => ({
+        const response = await nativeFetch(url);
+        if (Array.isArray(response)) {
+            return response
+                .map((item: any) => ({
                     lat: parseFloat(item.lat),
                     lon: parseFloat(item.lon),
                     name: item.display_name
-                }));
-            }
+                }))
+                .filter(loc => isWithinSouthIndia(loc.lat, loc.lon)); // Regional Restriction
         }
-    } catch {}
-    try {
-        const osmUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`;
-        const res = await fetch(osmUrl, { headers: { 'Accept': 'application/json' } });
-        if (!res.ok) return [];
-        const data = await res.json();
-        if (!Array.isArray(data)) return [];
-        return data.slice(0, 5).map((item: any) => ({
-            lat: parseFloat(item.lat),
-            lon: parseFloat(item.lon),
-            name: item.display_name
-        }));
-    } catch {
         return [];
+    } catch (error) {
+        logger.error(`Location search failed for "${query}"`, error);
+        throw new Error("Location search unavailable");
     }
 };
 
@@ -651,123 +705,85 @@ export const deleteReport = async (reportId: string | number): Promise<{ status:
     const res = await nativeFetch(url, { method: 'DELETE' });
     return res || null;
 };
+// Helper to process and balance wildlife data
+const processWildlifeList = async (list: any[]): Promise<any[]> => {
+    if (!Array.isArray(list) || list.length === 0) return [];
+
+    // Filter by South India bounds and valid species
+    const regionalList = list.filter(r => {
+        const lat = parseFloat(String(r.lat));
+        const lon = parseFloat(String(r.lon));
+        const sci = canonicalScientific(r.scientific_name);
+        return isWithinSouthIndia(lat, lon) && !!ANIMALS[sci];
+    });
+
+    if (regionalList.length === 0) return [];
+
+    // Simplify: Sort by date and return the list (no balancing or arbitrary caps as per "no other logic")
+    const sortedData = regionalList
+        .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime());
+
+    return await Promise.all(sortedData.map(async (record: { animal: string; scientific_name: string; lat: number; lon: number; eventDate: string; emoji?: string; image_url?: string }) => {
+        const sci = canonicalScientific(record.scientific_name);
+        const animalInfo = ANIMALS[sci] || { emoji: '🐾' };
+        const lat = parseFloat(String(record.lat));
+        const lon = parseFloat(String(record.lon));
+        let address = record.eventDate;
+        try {
+            const addr = await reverseGeocode(lat, lon);
+            if (addr && addr !== 'Address not found') address = addr;
+        } catch {
+            /* ignore */
+        }
+        
+        // Enforce emoji from constants if backend sends warning icon or missing
+        let emoji = record.emoji;
+        if (!emoji || emoji === '⚠️' || emoji === '?' || emoji.length > 4) {
+            emoji = animalInfo.emoji;
+        }
+
+        return {
+            id: `${sci}-${record.eventDate}-${lat}`,
+            name: animalInfo.common || record.animal,
+            scientificName: sci,
+            emoji: emoji,
+            lat,
+            lon,
+            date: record.eventDate,
+            address,
+            type: 'sighting' as const,
+            image_url: record.image_url || undefined,
+        };
+    }));
+};
+
 // --- TASK 3: Fetch Recent Wildlife from Backend ---
-export const fetchRecentWildlife = async (): Promise<any[]> => {
+export const fetchRecentWildlife = async (startDate?: string, endDate?: string): Promise<any[]> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) {
         logger.error("API_BASE_URL is not configured.");
         return [];
     }
-    const url = `${baseUrl}/api/wildlife/recent`;
+    
+    let url = `${baseUrl}/api/wildlife/recent`;
+    if (startDate && endDate) {
+        url += `?startDate=${startDate}&endDate=${endDate}`;
+    }
+
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Failed to fetch recent wildlife: ${response.status}`);
-        const data = await response.json();
-        let list: any[] = Array.isArray(data) ? data : [];
-        // Only fallback if list is completely empty
-        if (list.length === 0) {
+        const data = await nativeFetch(url);
+        let list: any[] = (data && Array.isArray(data)) ? data : [];
+        
+        // Only fallback if list is completely empty or fetch failed (and not in historical mode)
+        if (!startDate && (list.length === 0 || data?.status === 'degraded')) {
             list = Array.isArray(wildlifeRecent) ? wildlifeRecent : [];
         }
-        // Balance by species: pick up to 4 per species, then limit to 20
-        const bySpecies: Record<string, any[]> = {};
-        for (const r of list) {
-            const sci = canonicalScientific(r.scientific_name);
-            bySpecies[sci] = bySpecies[sci] || [];
-            bySpecies[sci].push(r);
-        }
-        const balanced: any[] = [];
-        const perSpeciesLimit = 4;
-        Object.keys(bySpecies).forEach(sci => {
-            const group = bySpecies[sci]
-                .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
-                .slice(0, perSpeciesLimit);
-            balanced.push(...group);
-        });
-        const recentData = balanced
-            .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
-            .slice(0, 20);
-
-        return await Promise.all(recentData.map(async (record: { animal: string; scientific_name: string; lat: number; lon: number; eventDate: string; emoji?: string; image_url?: string }) => {
-            const sci = canonicalScientific(record.scientific_name);
-            const animalInfo = ANIMALS[sci] || { emoji: '🐾' };
-            const lat = parseFloat(String(record.lat));
-            const lon = parseFloat(String(record.lon));
-            let address = record.eventDate;
-            try {
-                const addr = await reverseGeocode(lat, lon);
-                if (addr && addr !== 'Address not found') address = addr;
-            } catch {
-                /* ignore */
-            }
-            
-            // FIX: Enforce emoji from constants if backend sends warning icon or missing
-            // This prevents "⚠️" from overwriting the animal emoji
-            let emoji = record.emoji;
-            if (!emoji || emoji === '⚠️' || emoji === '?' || emoji.length > 4) {
-                emoji = animalInfo.emoji;
-            }
-
-            return {
-                id: `${sci}-${record.eventDate}-${lat}`,
-                name: animalInfo.common || record.animal,
-                scientificName: sci,
-                emoji: emoji,
-                lat,
-                lon,
-                date: record.eventDate,
-                address,
-                type: 'sighting' as const,
-                image_url: record.image_url || undefined,
-            };
-        }));
+        
+        return await processWildlifeList(list);
     } catch (error) {
         logger.error("Error fetching recent wildlife", error);
-        try {
-            const list: any[] = Array.isArray(wildlifeRecent) ? wildlifeRecent : [];
-            const speciesSet = new Set(list.map((r: any) => canonicalScientific(r.scientific_name)));
-            const bySpecies: Record<string, any[]> = {};
-            for (const r of list) {
-                const sci = canonicalScientific(r.scientific_name);
-                bySpecies[sci] = bySpecies[sci] || [];
-                bySpecies[sci].push(r);
-            }
-            const balanced: any[] = [];
-            const perSpeciesLimit = 4;
-            Object.keys(bySpecies).forEach(sci => {
-                const group = bySpecies[sci]
-                    .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
-                    .slice(0, perSpeciesLimit);
-                balanced.push(...group);
-            });
-            const recentData = balanced
-                .sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime())
-                .slice(0, 20);
-            return await Promise.all(recentData.map(async (record: any) => {
-                const sci = canonicalScientific(record.scientific_name);
-                const animalInfo = ANIMALS[sci] || { emoji: '🐾' };
-                const lat = parseFloat(String(record.lat));
-                const lon = parseFloat(String(record.lon));
-                let address = record.eventDate;
-                try {
-                    const addr = await reverseGeocode(lat, lon);
-                    if (addr && addr !== 'Address not found') address = addr;
-                } catch {}
-                return {
-                    id: `${sci}-${record.eventDate}-${lat}`,
-                    name: animalInfo.common || record.animal,
-                    scientificName: sci,
-                    emoji: animalInfo.emoji,
-                    lat,
-                    lon,
-                    date: record.eventDate,
-                    address,
-                    type: 'sighting' as const,
-                    image_url: record.image_url || undefined,
-                };
-            }));
-        } catch {
-            return [];
-        }
+        if (startDate) return []; // No fallback for historical mode
+        return await processWildlifeList(Array.isArray(wildlifeRecent) ? wildlifeRecent : []);
     }
 };
 

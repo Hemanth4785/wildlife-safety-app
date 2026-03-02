@@ -44,6 +44,8 @@ export interface Route {
     start: Location;
     end: Location;
     mode: TravelMode;
+    status?: 'success' | 'degraded' | 'failed';
+    source?: string;
 }
 
 export interface SafeRouteResponse {

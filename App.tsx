@@ -40,7 +40,7 @@ const AppContent: React.FC = () => {
         // From Context (Animal Data)
         status, message, userLocation, predictions, processLocationSearch,
         searchHistory, clearSearchHistory,
-        suggestions, isSuggesting, fetchSuggestions, clearSuggestions,
+        suggestions, isSuggesting, fetchSuggestions, clearSuggestions, searchError,
         safeRoute, routeStatus, routeMessage, calculateSafeRoute, safePlaces, riskZones, riskySegments,
         isNavigating, liveLocation, navigationStats, startNavigation, stopNavigation,
         navigationAlert, clearNavigationAlert, closestPathIndex, getCurrentLocation,
@@ -52,7 +52,9 @@ const AppContent: React.FC = () => {
         visibleAnimals, setVisibleAnimals,
         showPredictions, setShowPredictions,
         showNearbyRadius, setShowNearbyRadius,
-        showAnimalMarkers, setShowAnimalMarkers
+        showAnimalMarkers, setShowAnimalMarkers,
+        historicalMode, setHistoricalMode,
+        historicalDateRange, setHistoricalDateRange
     } = useAppContext();
 
     const [currentView, setCurrentView] = useState(View.HOME);
@@ -140,7 +142,8 @@ const AppContent: React.FC = () => {
                      status={status} message={message} userLocation={userLocation} predictions={predictions} safeRoute={safeRoute}
                      safePlaces={safePlaces} riskZones={riskZones} riskySegments={riskySegments}
                      onLocationSubmit={processLocationSearch} suggestions={suggestions} isSuggesting={isSuggesting}
-                     onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} routeStatus={routeStatus}
+                     onFetchSuggestions={fetchSuggestions} onClearSuggestions={clearSuggestions} searchError={searchError}
+                     routeStatus={routeStatus}
                      routeMessage={routeMessage} onCalculateSafeRoute={calculateSafeRoute} getCurrentLocation={getCurrentLocation}
                      isNavigating={isNavigating} liveLocation={liveLocation} navigationStats={navigationStats}
                      onStopNavigation={stopNavigation} navigationAlert={navigationAlert}
@@ -164,6 +167,10 @@ const AppContent: React.FC = () => {
                      setShowNearbyRadius={setShowNearbyRadius}
                      showAnimalMarkers={showAnimalMarkers}
                      setShowAnimalMarkers={setShowAnimalMarkers}
+                     historicalMode={historicalMode}
+                     setHistoricalMode={setHistoricalMode}
+                     historicalDateRange={historicalDateRange}
+                     setHistoricalDateRange={setHistoricalDateRange}
                      onStartNavigation={handleStartNavigation}
                  />
              </RNView>
