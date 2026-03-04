@@ -15,7 +15,7 @@ interface ReportsViewProps {
 }
 
 const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
-    const { reports, removeReport } = useAppContext();
+    const { reports, removeReport, setShowPredictions } = useAppContext();
     const [activeTab, setActiveTab] = useState<'submit' | 'recent'>('submit');
     const [wildlifeType, setWildlifeType] = useState('');
     const [location, setLocation] = useState('');
@@ -55,14 +55,30 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            const res = await deleteReportApi(reportId);
-                            if (res && res.status === 'success') {
-                                const deletedId = res.deletedId || String(reportId);
-                                await removeReport(deletedId);
-                                return;
-                            }
-                            Alert.alert('Error', 'Could not delete the report.');
+                            const { deleteDoc, doc, getDoc } = await import('firebase/firestore');
+                            const { db } = await import('../services/firebase');
+                            const uid = auth.currentUser?.uid || '';
+                            const ref = doc(db, 'reports', String(reportId));
+                            try {
+                                const snap = await getDoc(ref);
+                                const data: any = snap.exists() ? snap.data() : {};
+                                if (data?.userId && data.userId !== uid) {
+                                    Alert.alert('Error', 'You do not have permission to delete this report.');
+                                    return;
+                                }
+                            } catch {}
+                            await deleteDoc(ref);
+                            await removeReport(String(reportId));
+                            return;
                         } catch {
+                            try {
+                                const res = await deleteReportApi(reportId);
+                                if (res && res.status === 'success') {
+                                    const deletedId = res.deletedId || String(reportId);
+                                    await removeReport(deletedId);
+                                    return;
+                                }
+                            } catch {}
                             Alert.alert('Error', 'Could not delete the report.');
                         }
                     }
@@ -93,6 +109,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
         })();
         return () => { mounted = false; };
     }, []);
+
+    useEffect(() => {
+        if (activeTab === 'recent') {
+            try { setShowPredictions(false); } catch {}
+        }
+    }, [activeTab, setShowPredictions]);
 
     const handleUseCurrentLocation = async () => {
         try {
@@ -220,6 +242,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
             setImageData(undefined);
             setCoords(null);
             setActiveTab('recent');
+            try { setShowPredictions(false); } catch {}
         } catch (error) {
             Alert.alert("Error", "Failed to submit report. Please try again.");
         } finally {

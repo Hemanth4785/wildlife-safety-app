@@ -838,6 +838,12 @@ const MapView: React.FC<MapViewProps> = (props) => {
         }
     }, [props.reports, map]);
     useEffect(() => {
+        // When coming from submitted reports, hide predictions on the map
+        if ((props.reports || []).some(r => typeof r.lat === 'number' && typeof r.lon === 'number')) {
+            try { setShowPredictions(false); } catch {}
+        }
+    }, [props.reports, setShowPredictions]);
+    useEffect(() => {
         if (!map || filteredPredictions.length === 0) {
             setAnimalClusters([]);
             return;
@@ -1036,7 +1042,7 @@ const MapView: React.FC<MapViewProps> = (props) => {
                         </div>
                     )}
 
-                    {predictions.map(p => {
+                    {filteredPredictions.map(p => {
                         const icon = new L.DivIcon({
                              html: `<div class="text-3xl" style="text-shadow: 0 0 5px white;">${p.emoji}</div>`,
                              className: 'leaflet-div-icon',

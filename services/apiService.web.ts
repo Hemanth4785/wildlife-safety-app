@@ -6,6 +6,7 @@ import { CONFIG } from '../config';
 import wildlifeRecent from '../wildlife_recent.json';
 import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
+import { auth } from './firebase';
 
 let wildlifeAllCache: any[] | null = null;
 let wildlifeAllCacheAt = 0;
@@ -683,7 +684,14 @@ export const deleteReport = async (reportId: string | number): Promise<{ status:
     const id = String(reportId);
     const url = `${baseUrl}/api/reports/${encodeURIComponent(id)}`;
     try {
-        const response = await fetch(url, { method: 'DELETE' });
+        const uid = auth.currentUser?.uid || '';
+        const email = auth.currentUser?.email || '';
+        let headers: Record<string, string> = { 'x-user-id': uid, 'x-user-email': email };
+        try {
+            const token = await auth.currentUser?.getIdToken?.();
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+        } catch {}
+        const response = await fetch(url, { method: 'DELETE', headers });
         if (!response.ok) return { status: 'failed', error: 'Delete failed' };
         return await response.json();
     } catch {

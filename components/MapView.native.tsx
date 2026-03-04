@@ -431,6 +431,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [predictionRisk, setPredictionRisk] = useState<string | null>(null);
     const [predictedAnimalName, setPredictedAnimalName] = useState<string>('');
     const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+    const [predictionModel, setPredictionModel] = useState<string | null>(null);
 
     // --- RESTORED HANDLERS & HELPERS ---
 
@@ -452,14 +453,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     const processedSafePlaces = useMemo(() => {
         if (!Array.isArray(safePlaces) || safePlaces.length === 0) return [];
-        
-        // If a route is active, ONLY show safe places (already filtered to 3km in service)
-        if (safeRoute?.path && safeRoute.path.length > 0) {
-            return safePlaces.filter(p => p.lat && p.lon);
-        }
-        
-        // Hide global safe places when no route is active (per goal)
-        return [];
+        // Always show valid safe places; along-route queries are already filtered in the service layer
+        return safePlaces.filter(p => p.lat && p.lon);
     }, [safePlaces, safeRoute?.path]);
 
     const safePredictedPath = useMemo(() => {
@@ -526,38 +521,39 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             // Prepare arguments for the service call
             const animalName = selectedAnimal.scientificName || selectedAnimal.name;
             
-            // Use user location if available, otherwise use default
+            // Use user location only for risk calculation
             const userLoc = userLocation 
                 ? { lat: userLocation.lat, lon: userLocation.lon }
-                : { lat: selectedAnimal.lat, lon: selectedAnimal.lon }; // Fallback to animal loc if user loc missing
+                : { lat: selectedAnimal.lat, lon: selectedAnimal.lon };
 
-            // Construct recent path (current animal position)
-            const recentPath: [number, number][] = [[selectedAnimal.lat, selectedAnimal.lon]];
+            setPredictedPath([]);
+            setPredictionRisk(null);
+
+            const wildlifeBase = { lat: selectedAnimal.lat, lon: selectedAnimal.lon };
+            const recentPath: [number, number][] = [
+                [wildlifeBase.lat, wildlifeBase.lon]
+            ];
+            console.log("Wildlife Base Coordinate:", wildlifeBase);
 
             // Use API to predict
             const result = await api.predictMovement(
                 animalName,
                 userLoc,
                 recentPath,
-                3 // kFuture
+                3,
+                wildlifeBase
             );
+            console.log('[Movement] RN api_response:', JSON.stringify({ status: (result as any)?.status, path_len: (result as any)?.path?.length }));
+            console.log('Prediction model:', (result as any)?.model_used);
             
-            if (result && Array.isArray(result.path)) {
-                // Enrich path with addresses if missing
-                const enrichedPath = await Promise.all(result.path.map(async (p) => {
-                    if (!p.address || p.address.trim() === '') {
-                        const addr = await api.reverseGeocode(p.lat, p.lon);
-                        return { ...p, address: addr };
-                    }
-                    return p;
-                }));
-                
-                setPredictedPath(enrichedPath);
+            if (result && Array.isArray(result.path) && result.path.length > 0) {
+                setPredictedPath(result.path);
                 setPredictionRisk(result.risk_level);
                 setPredictedAnimalName(selectedAnimal.name);
+                setPredictionModel((result as any)?.model_used || 'simulation');
                 setUiMode(UIMode.PREDICTION);
             } else {
-                 Alert.alert('Prediction Unavailable', 'Could not generate a prediction path for this animal.');
+                console.log('[Movement] No valid path returned, but not blocking UI.');
             }
         } catch (e) {
             console.error('Prediction error:', e);
@@ -623,6 +619,14 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             console.log(`[MapView] Rendering ${processedSafePlaces.length} safe places on map.`);
         }
     }, [processedSafePlaces]);
+
+    useEffect(() => {
+        if (!isNavigating && uiMode === UIMode.MAP && !showAnimalMarkers) {
+            if ((Array.isArray(recentSightings) && recentSightings.length > 0) || (Array.isArray(riskZones) && riskZones.length > 0)) {
+                setShowAnimalMarkers(true);
+            }
+        }
+    }, [isNavigating, uiMode, showAnimalMarkers, recentSightings, riskZones, setShowAnimalMarkers]);
 
     // NEW: Conditional marker logic based on route activity
     const animalMarkers = useMemo(() => {

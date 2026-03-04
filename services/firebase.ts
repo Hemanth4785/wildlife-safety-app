@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
 // @ts-ignore: getReactNativePersistence is available in React Native but types might miss it in the wrapper
 import { initializeAuth, browserLocalPersistence, getAuth, setPersistence, getReactNativePersistence, type Auth } from 'firebase/auth';
 import { Platform } from 'react-native';
@@ -35,7 +35,9 @@ if (Platform.OS === 'web') {
 }
 
 export { auth };
-export const db = getFirestore(app);
+export const db = Platform.OS === 'web'
+  ? getFirestore(app)
+  : initializeFirestore(app, { experimentalForceLongPolling: true });
 
 console.log("Firebase Auth Persistence initialized");
 console.log("Firestore Persistence enabled by default");

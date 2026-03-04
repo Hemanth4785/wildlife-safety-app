@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync, execFile } from 'child_process';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import polyline from '@mapbox/polyline';
 
 dotenv.config();
@@ -199,8 +199,8 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type'],
+    methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-email'],
   })
 );
 app.use(express.json({ limit: '10mb' }));
@@ -210,7 +210,14 @@ app.delete('/api/reports/:id', async (req, res) => {
         const reportId = String(req.params.id || '').trim();
         if (!reportId) return res.status(400).json({ status: 'failed', error: 'Missing report id' });
         if (!db) return res.status(500).json({ status: 'failed', error: 'Firestore not initialized' });
-        await deleteDoc(doc(db, 'reports', reportId));
+        const uid = String(req.header('x-user-id') || '').trim();
+        if (!uid) return res.status(401).json({ status: 'failed', error: 'Unauthorized' });
+        const ref = doc(db, 'reports', reportId);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) return res.status(404).json({ status: 'failed', error: 'Not found' });
+        const data = snap.data() || {};
+        if (String(data.userId || '') !== uid) return res.status(403).json({ status: 'failed', error: 'Forbidden' });
+        await deleteDoc(ref);
         return res.json({ status: 'success', deletedId: reportId });
     } catch (e) {
         return res.status(500).json({ status: 'failed', error: 'Delete failed' });
@@ -544,7 +551,6 @@ app.post('/api/predict-animal-paths', (req, res) => {
         if (points.length < 2) {
             return res.json({ success: true, predictedZones: [] });
         }
-        // Use last 5 segments to estimate direction
         const K = Math.min(5, points.length - 1);
         let dLat = 0, dLng = 0;
         for (let i = points.length - K - 1; i < points.length - 1; i++) {
@@ -554,9 +560,19 @@ app.post('/api/predict-animal-paths', (req, res) => {
         }
         dLat /= K;
         dLng /= K;
-        // Generate 3 future points with slight decay to avoid overshoot
+        const minDeg = 0.006;
+        const mag = Math.sqrt(dLat * dLat + dLng * dLng);
+        if (!Number.isFinite(mag) || mag === 0) {
+            const theta = Math.random() * Math.PI * 2;
+            dLat = minDeg * Math.cos(theta);
+            dLng = minDeg * Math.sin(theta);
+        } else if (mag < minDeg) {
+            const s = minDeg / mag;
+            dLat *= s;
+            dLng *= s;
+        }
         const FUTURE_STEPS = 3;
-        const decay = 0.8;
+        const decay = 0.9;
         const start = points[points.length - 1];
         const predictedZones = [];
         let stepLat = dLat, stepLng = dLng;
@@ -577,7 +593,7 @@ app.post('/api/predict-animal-paths', (req, res) => {
 
 // API: Get Recent Data (for UI/Routing)
 app.get('/api/wildlife/recent', (req, res) => {
-    const days = req.query.days ? parseInt(req.query.days) : 30;
+    const days = req.query.days ? parseInt(req.query.days) : 45;
     const startDate = req.query.startDate || null;
     const endDate = req.query.endDate || null;
     
@@ -604,8 +620,8 @@ app.get('/api/sightings', (req, res) => {
         return res.json([]);
     }
 
-    // Use only recent data for map display (default: 30 days)
-    const wildlife = getRecentData(30);
+    // Use only recent data for map display
+    const wildlife = getRecentData(45);
     
     const filtered = wildlife.filter(animal => {
         if (scientificName && animal.scientific_name !== scientificName) return false;
@@ -639,26 +655,13 @@ app.get('/api/route/osrm', async (req, res) => {
         return res.status(400).json({ error: 'Invalid coordinates' });
     }
 
-    const straightLineRoute = (payload = {}) => {
-        console.warn(`[Route] FALLBACK: Routing failed or service unavailable. Returning straight line. Reason: ${payload.error || 'Unknown'}`);
-        const distKm = haversineDistanceKm(startLatN, startLonN, endLatN, endLonN);
-        let speedKmh = 45;
-        if (mode === 'walk') speedKmh = 4;
-        else if (mode === 'bike') speedKmh = 12;
-        else if (mode === 'bus') speedKmh = 30;
-        else speedKmh = 45;
-        const durationSec = distKm > 0 ? (distKm / speedKmh) * 3600 : 0;
-        return {
-            geometry: {
-                type: 'LineString',
-                coordinates: [[startLonN, startLatN], [endLonN, endLatN]]
-            },
-            distance: distKm * 1000,
-            duration: durationSec,
-            status: 'degraded',
-            source: 'straight_line',
-            ...payload
-        };
+    const routingFailed = (reason, extra = {}) => {
+        console.error(`[Route] ROUTING FAILED: ${reason}`, extra);
+        return res.status(502).json({
+            status: 'routing_failed',
+            reason,
+            ...extra
+        });
     };
 
     // --- Helper: OSRM Logic ---
@@ -727,11 +730,12 @@ app.get('/api/route/osrm', async (req, res) => {
             const route = response.data.routes[0];
             const pointCount = route.geometry?.coordinates?.length || 0;
             
+            console.log(`[OSRM] Geometry points: ${pointCount}`);
             if (pointCount <= 2) {
-                console.warn('[OSRM] WARNING: OSRM returned a straight line (2 points). Snap distance might be too large.');
-            } else {
-                console.log(`[OSRM] SUCCESS: Decoded path with ${pointCount} points.`);
+                console.warn('[OSRM] WARNING: OSRM returned only 2 points (likely straight line).');
+                return { status: 'failed', error: 'osrm_two_points' };
             }
+            console.log('[OSRM] SUCCESS: Using OSRM route.');
 
             return {
                 geometry: route.geometry,
@@ -757,7 +761,8 @@ app.get('/api/route/osrm', async (req, res) => {
         console.log('[Route] INFO: Google disabled or key missing. Routing via OSRM.');
         const osrmResult = await fetchOsrmRoute();
         if (osrmResult.status === 'success') return res.json(osrmResult);
-        return res.json(straightLineRoute({ error: 'Routing service unavailable', message: "Using straight-line fallback" }));
+        console.warn('[Route] FALLBACK TRIGGERED: OSRM failed when Google disabled.');
+        return routingFailed('google_disabled_and_osrm_failed', { osrm_error: osrmResult.error });
     }
 
     // --- Google Routes Logic ---
@@ -821,7 +826,8 @@ app.get('/api/route/osrm', async (req, res) => {
             console.warn('[Google Routes] No routes found. Trying OSRM...');
             const osrmResult = await fetchOsrmRoute();
             if (osrmResult.status === 'success') return res.json(osrmResult);
-            return res.json(straightLineRoute({ error: 'No route found' }));
+            console.warn('[Route] FALLBACK TRIGGERED: Both Google and OSRM failed.');
+            return routingFailed('google_no_routes_and_osrm_failed', { osrm_error: osrmResult.error });
         }
 
         const route = routes[0];
@@ -837,7 +843,11 @@ app.get('/api/route/osrm', async (req, res) => {
         console.log(`[Google Routes] SUCCESS: Decoded path with ${pointCount} points.`);
         
         if (pointCount <= 2) {
-            console.warn('[Google Routes] WARNING: Route has 2 or fewer points (likely a straight line).');
+            console.warn('[Google Routes] WARNING: Route has 2 or fewer points (likely a straight line). Trying OSRM...');
+            const osrmResult = await fetchOsrmRoute();
+            if (osrmResult.status === 'success') return res.json(osrmResult);
+            console.warn('[Route] FALLBACK TRIGGERED: Google 2-point route and OSRM failed.');
+            return routingFailed('google_two_points_and_osrm_failed', { osrm_error: osrmResult.error });
         }
 
         let durationSeconds = 0;
@@ -882,12 +892,8 @@ app.get('/api/route/osrm', async (req, res) => {
             }
         }
         
-        // Final fallback to straight line
-        res.json(straightLineRoute({ 
-            error: 'Routing service unavailable',
-            message: "Using straight-line fallback (degraded mode)",
-            details: error.message
-        }));
+        console.warn('[Route] FALLBACK TRIGGERED: Google error and OSRM failed.');
+        return routingFailed('google_error_and_osrm_failed', { google_error: error.message });
     }
 });
 
@@ -911,8 +917,10 @@ app.post('/api/animals/near-route', (req, res) => {
     // Convert [lon, lat] to [lat, lon] for our helper
     const routePath = pathPoints.map(p => [p[1], p[0]]);
 
-    // Use Recent Data ONLY for Routing (default: 30 days)
-    const wildlife = getRecentData(30);
+    // Time window and distance threshold can be customized via query
+    const days = Number.isFinite(parseInt(String(req.query?.days))) ? parseInt(String(req.query.days)) : 45;
+    const thresholdKm = Number.isFinite(parseFloat(String(req.query?.thresholdKm))) ? parseFloat(String(req.query.thresholdKm)) : 5.0;
+    const wildlife = getRecentData(days);
     const riskZones = [];
 
     // Filter logic
@@ -925,11 +933,11 @@ app.post('/api/animals/near-route', (req, res) => {
 
         const distKm = minDistanceToRoute(lat, lon, routePath);
         
-        if (distKm <= 5.0) {
+        if (distKm <= thresholdKm) {
             console.log(`[RiskAnalysis] Animal ${animal.animal} (${animal.scientific_name}) found at ${distKm.toFixed(2)}km from route.`);
             riskZones.push({ 
                 ...animal, 
-                riskLevel: distKm <= 2.0 ? 'HIGH' : 'CAUTION', 
+                riskLevel: distKm <= Math.min(2.0, thresholdKm / 2) ? 'HIGH' : 'CAUTION', 
                 distanceToRoute: distKm 
             });
         }
@@ -988,7 +996,7 @@ app.get('/api/search-locations', async (req, res) => {
 
     try {
         const r = await axios.get('https://nominatim.openstreetmap.org/search', {
-            params: { q, format: 'json', limit: 10 },
+            params: { q, format: 'json', limit: 10, countrycodes: 'in' },
             headers: { 
                 'User-Agent': 'WildlifeSafetyApp/1.0 (edu-project)',
                 'Referer': 'http://localhost'
@@ -1325,44 +1333,559 @@ app.post('/api/predict-risk', (req, res) => {
 });
 
 // --- NEW: LSTM Movement Prediction Endpoint (Simplified) ---
-// Uses heuristic if ML models are unavailable or fail
 app.post('/api/predict-movement', async (req, res) => {
-    const { animal, user_location, recent_path, k_future } = req.body;
+    const { animal, user_location, recent_path, k_future, wildlife_location } = req.body;
     
-    // 1. Basic validation
     if (!animal || !user_location) {
         return res.status(400).json({ error: 'Missing animal or user_location' });
     }
 
-    // 2. Prepare recent path (use current location if empty)
-    let pathPoints = Array.isArray(recent_path) ? recent_path : [];
-    if (pathPoints.length === 0 && user_location.lat && user_location.lon) {
-        pathPoints = [[user_location.lat, user_location.lon]];
+    const WINDOW_SIZE = 5;
+    const arr = Array.isArray(recent_path) ? recent_path : [];
+    console.log(`[Movement] recent_path_len=${arr.length} animal=${animal} k_future=${k_future || 3}`);
+    console.log('Wildlife base:', wildlife_location);
+    console.log('Recent path last point:', Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null);
+    console.log('User location:', user_location);
+    // --- Hybrid Model Selection: Early Exit Branches ---
+    if (Array.isArray(arr) && arr.length >= WINDOW_SIZE) {
+        const payloadLstm = JSON.stringify({ animal, recent_path: arr, user_location, k_future: k_future || 3 });
+        execFile(ML_PYTHON_EXE, [ML_LSTM_SCRIPT, payloadLstm], {
+            cwd: ML_DIR,
+            timeout: 15000,
+            maxBuffer: 1024 * 1024 * 5
+        }, (error, stdout, stderr) => {
+            if (error || !stdout) {
+                if (stderr) console.error('[ML-Movement Stderr]:', String(stderr).slice(0, 1000));
+                if (error) console.error('[ML-Movement Error]:', error.message);
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                console.log('Prediction base coordinate:', base);
+                console.log('User location:', user_location);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.006;
+                const decay = 0.9;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const trimmed = String(stdout).trim();
+            console.log('[ML-Movement RawStdout]:', trimmed.substring(0, 200));
+            let parsed = null;
+            try {
+                parsed = JSON.parse(trimmed);
+            } catch (e) {
+                console.error('[ML-Movement ParseError]:', e.message);
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                console.log('Prediction base coordinate:', base);
+                console.log('User location:', user_location);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.006;
+                const decay = 0.9;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const predicted = Array.isArray(parsed?.predicted_path) ? parsed.predicted_path : [];
+            console.log('[Movement] parsed_predicted_path_len=', predicted.length);
+            if (!predicted.length || !Array.isArray(predicted[0])) {
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                console.log('Prediction base coordinate:', base);
+                console.log('User location:', user_location);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.006;
+                const decay = 0.9;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const pathObjs = predicted.map((p, i) => ({ lat: Number(p[0]), lon: Number(p[1]), address: 'Predicted Location ' + (i + 1) }));
+            const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                ? [wildlife_location.lat, wildlife_location.lon]
+                : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+            console.log('Wildlife base:', wildlife_location);
+            console.log('User location:', user_location);
+            console.log('Prediction base used:', base);
+            const first = pathObjs[0];
+            console.log('User location:', user_location);
+            console.log('Latest wildlife coordinate:', base);
+            console.log('First predicted point:', first);
+            const distKm = haversineDistanceKm(user_location.lat, user_location.lon, first.lat, first.lon);
+            const baseDistKm = haversineDistanceKm(Number(base[0]), Number(base[1]), first.lat, first.lon);
+            console.log('Distance(base→first_pred_km)=', baseDistKm.toFixed(4));
+            const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+            execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                cwd: ML_DIR,
+                timeout: 12000,
+                maxBuffer: 1024 * 1024 * 5
+            }, (err2, out2, err2stderr) => {
+                let riskLevel = 'Medium';
+                if (err2 || !out2) {
+                    if (err2stderr) console.error('[ML-Risk Stderr]:', String(err2stderr).slice(0, 1000));
+                    if (err2) console.error('[ML-Risk Error]:', err2.message);
+                } else {
+                    try {
+                        const rt = String(out2).trim();
+                        console.log('[ML-Risk RawStdout]:', rt.substring(0, 200));
+                        const rj = JSON.parse(rt);
+                        riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium';
+                    } catch (pe) {
+                        console.error('[ML-Risk ParseError]:', pe.message);
+                    }
+                }
+                const resp = { animal, path: pathObjs, risk_level: riskLevel, safety_override: !!parsed?.safety_override, distance_to_user_km: distKm, model_used: 'lstm' };
+                console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                return res.json(resp);
+            });
+        });
+        return;
     }
-    
-    // 3. Fallback Heuristic Generation (since ML models might be missing/failing)
-    // Generate 3 points moving slightly away from user or continuing direction
-    const startLat = Number(pathPoints[pathPoints.length - 1][0] || user_location.lat);
-    const startLon = Number(pathPoints[pathPoints.length - 1][1] || user_location.lon);
-    
-    const predictedPoints = [];
-    for (let i = 1; i <= (k_future || 3); i++) {
-        // Simple random walk with slight bias
-        const latOffset = (Math.random() - 0.5) * 0.002 * i; 
-        const lonOffset = (Math.random() - 0.5) * 0.002 * i;
-        predictedPoints.push({
-            lat: startLat + latOffset,
-            lon: startLon + lonOffset,
-            address: 'Predicted Location ' + i
+    if (Array.isArray(arr) && arr.length >= 3) {
+        const payloadMaxent = JSON.stringify({ animal, recent_path: arr, user_location, k_future: k_future || 3 });
+        execFile(ML_PYTHON_EXE, [ML_MAXENT_SCRIPT, payloadMaxent], {
+            cwd: ML_DIR,
+            timeout: 15000,
+            maxBuffer: 1024 * 1024 * 5
+        }, (error, stdout, stderr) => {
+            if (error || !stdout) {
+                if (stderr) console.error('[ML-Movement Stderr]:', String(stderr).slice(0, 1000));
+                if (error) console.error('[ML-Movement Error]:', error.message);
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                console.log('Prediction base coordinate:', base);
+                console.log('User location:', user_location);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.006;
+                const decay = 0.9;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const trimmed = String(stdout).trim();
+            console.log('[ML-Movement RawStdout]:', trimmed.substring(0, 200));
+            let parsed = null;
+            try {
+                parsed = JSON.parse(trimmed);
+            } catch (e) {
+                console.error('[ML-Movement ParseError]:', e.message);
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.006;
+                const decay = 0.9;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const predicted = Array.isArray(parsed?.predicted_path) ? parsed.predicted_path : [];
+            console.log('[Movement] parsed_predicted_path_len=', predicted.length);
+            if (!predicted.length || !Array.isArray(predicted[0])) {
+                // Simulation fallback
+                console.log('[Movement] Using simulation fallback');
+                const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                    ? [wildlife_location.lat, wildlife_location.lon]
+                    : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+                console.log('Wildlife base:', wildlife_location);
+                console.log('User location:', user_location);
+                console.log('Prediction base used:', base);
+                const lastLat = Number(base[0]);
+                const lastLon = Number(base[1]);
+                const baseTheta = 0;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const randDeg = () => (Math.random() * 30 - 15);
+                const baseStep = 0.0038;
+                const decay = 0.82;
+                const points = [];
+                let curLat = lastLat, curLon = lastLon, step = baseStep;
+                for (let i = 1; i <= (k_future || 3); i++) {
+                    const theta = baseTheta + toRad(randDeg());
+                    const dLat = step * Math.cos(theta);
+                    const dLon = step * Math.sin(theta);
+                    curLat += dLat; curLon += dLon;
+                    points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i });
+                    step *= decay;
+                }
+                const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+                const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+                return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                    cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5
+                }, (err2, out2, err2stderr) => {
+                    let riskLevel = 'Medium';
+                    if (!err2 && out2) {
+                        try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {}
+                    }
+                    const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                    console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                    return res.json(resp);
+                });
+            }
+            const pathObjs = predicted.map((p, i) => ({ lat: Number(p[0]), lon: Number(p[1]), address: 'Predicted Location ' + (i + 1) }));
+            const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                ? [wildlife_location.lat, wildlife_location.lon]
+                : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+            console.log('Wildlife base:', wildlife_location);
+            console.log('User location:', user_location);
+            console.log('Prediction base used:', base);
+            const first = pathObjs[0];
+            console.log('User location:', user_location);
+            console.log('Latest wildlife coordinate:', base);
+            console.log('First predicted point:', first);
+            const distKm = haversineDistanceKm(user_location.lat, user_location.lon, first.lat, first.lon);
+            const baseDistKm = haversineDistanceKm(Number(base[0]), Number(base[1]), first.lat, first.lon);
+            console.log('Distance(base→first_pred_km)=', baseDistKm.toFixed(4));
+            if (isFinite(baseDistKm) && baseDistKm > 0.1) {
+                const dLat = Number(base[0]) - first.lat;
+                const dLon = Number(base[1]) - first.lon;
+                for (let i = 0; i < pathObjs.length; i++) {
+                    pathObjs[i].lat += dLat;
+                    pathObjs[i].lon += dLon;
+                }
+            }
+            const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+            execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+                cwd: ML_DIR,
+                timeout: 12000,
+                maxBuffer: 1024 * 1024 * 5
+            }, (err2, out2, err2stderr) => {
+                let riskLevel = 'Medium';
+                if (err2 || !out2) {
+                    if (err2stderr) console.error('[ML-Risk Stderr]:', String(err2stderr).slice(0, 1000));
+                    if (err2) console.error('[ML-Risk Error]:', err2.message);
+                } else {
+                    try {
+                        const rt = String(out2).trim();
+                        console.log('[ML-Risk RawStdout]:', rt.substring(0, 200));
+                        const rj = JSON.parse(rt);
+                        riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium';
+                    } catch (pe) {
+                        console.error('[ML-Risk ParseError]:', pe.message);
+                    }
+                }
+                const resp = { animal, path: pathObjs, risk_level: riskLevel, safety_override: !!parsed?.safety_override, distance_to_user_km: distKm, model_used: 'maxent' };
+                console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                return res.json(resp);
+            });
+        });
+        return;
+    }
+    if (!Array.isArray(arr) || arr.length < 3) {
+        console.log('[Movement] Forcing simulation fallback');
+        const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+            ? [wildlife_location.lat, wildlife_location.lon]
+            : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+        console.log('Wildlife base:', wildlife_location);
+        console.log('User location:', user_location);
+        console.log('Prediction base used:', base);
+        const lat = Number(base[0]);
+        const lon = Number(base[1]);
+        console.log('Prediction base coordinate:', base);
+        console.log('User location:', user_location);
+        const path = [];
+        let angle = Math.random() * Math.PI * 2;
+        let step = 0.003;
+        for (let i = 0; i < 3; i++) {
+            const newLat = lat + step * Math.cos(angle);
+            const newLon = lon + step * Math.sin(angle);
+            path.push({ lat: newLat, lon: newLon, address: `Predicted Location ${i + 1}` });
+            step *= 0.85;
+            angle += (Math.random() - 0.5) * 0.5;
+        }
+        return res.json({
+            animal,
+            path,
+            risk_level: 'Medium',
+            safety_override: false,
+            distance_to_user_km: 1,
+            model_used: 'simulation'
         });
     }
 
-    // 4. Return response (matching frontend expectation 'path')
-    return res.json({
-        animal: animal,
-        path: predictedPoints,
-        risk_level: 'Medium',
-        safety_override: false
+    const payload = JSON.stringify({
+        animal,
+        recent_path: arr,
+        user_location,
+        k_future: k_future || 3
+    });
+
+    const scriptToRun = arr.length >= WINDOW_SIZE ? ML_LSTM_SCRIPT : ML_MAXENT_SCRIPT;
+    const modelLabel = arr.length >= WINDOW_SIZE ? 'lstm' : 'maxent';
+
+    execFile(ML_PYTHON_EXE, [scriptToRun, payload], {
+        cwd: ML_DIR,
+        timeout: 15000,
+        maxBuffer: 1024 * 1024 * 5
+    }, (error, stdout, stderr) => {
+        if (error || !stdout) {
+            if (stderr) console.error('[ML-Movement Stderr]:', String(stderr).slice(0, 1000));
+            if (error) console.error('[ML-Movement Error]:', error.message);
+            // Simulation fallback
+            console.log('[Movement] Using simulation fallback');
+            const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                ? [wildlife_location.lat, wildlife_location.lon]
+                : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+            console.log('Wildlife base:', wildlife_location);
+            console.log('User location:', user_location);
+            console.log('Prediction base used:', base);
+            const lastLat = Number(base[0]); const lastLon = Number(base[1]);
+            const toRad = (deg) => (deg * Math.PI) / 180; const randDeg = () => (Math.random() * 30 - 15);
+            const baseStep = 0.006; const decay = 0.9; const points = [];
+            let curLat = lastLat, curLon = lastLon, step = baseStep;
+            for (let i = 1; i <= (k_future || 3); i++) { const theta = toRad(randDeg()); curLat += step * Math.cos(theta); curLon += step * Math.sin(theta); points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i }); step *= decay; }
+            const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+            const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+            return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], { cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5 }, (err2, out2) => {
+                let riskLevel = 'Medium'; if (!err2 && out2) { try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {} }
+                const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                return res.json(resp);
+            });
+        }
+        const trimmed = String(stdout).trim();
+        console.log('[ML-Movement RawStdout]:', trimmed.substring(0, 200));
+        let parsed = null;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (e) {
+            console.error('[ML-Movement ParseError]:', e.message);
+            // Simulation fallback
+            console.log('[Movement] Using simulation fallback');
+            const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                ? [wildlife_location.lat, wildlife_location.lon]
+                : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+            console.log('Wildlife base:', wildlife_location);
+            console.log('User location:', user_location);
+            console.log('Prediction base used:', base);
+            const lastLat = Number(base[0]); const lastLon = Number(base[1]);
+            const toRad = (deg) => (deg * Math.PI) / 180; const randDeg = () => (Math.random() * 30 - 15);
+            const baseStep = 0.006; const decay = 0.9; const points = [];
+            let curLat = lastLat, curLon = lastLon, step = baseStep;
+            for (let i = 1; i <= (k_future || 3); i++) { const theta = toRad(randDeg()); curLat += step * Math.cos(theta); curLon += step * Math.sin(theta); points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i }); step *= decay; }
+            const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+            const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+            return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], { cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5 }, (err2, out2) => {
+                let riskLevel = 'Medium'; if (!err2 && out2) { try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {} }
+                const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                return res.json(resp);
+            });
+        }
+        const predicted = Array.isArray(parsed?.predicted_path) ? parsed.predicted_path : [];
+        console.log('[Movement] parsed_predicted_path_len=', predicted.length);
+        if (!predicted.length || !Array.isArray(predicted[0])) {
+            // Simulation fallback
+            console.log('[Movement] Using simulation fallback');
+            const base = (wildlife_location && Number.isFinite(wildlife_location.lat) && Number.isFinite(wildlife_location.lon))
+                ? [wildlife_location.lat, wildlife_location.lon]
+                : (Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : [NaN, NaN]);
+            console.log('Wildlife base:', wildlife_location);
+            console.log('User location:', user_location);
+            console.log('Prediction base used:', base);
+            const lastLat = Number(base[0]); const lastLon = Number(base[1]);
+            const toRad = (deg) => (deg * Math.PI) / 180; const randDeg = () => (Math.random() * 30 - 15);
+            const baseStep = 0.006; const decay = 0.9; const points = [];
+            let curLat = lastLat, curLon = lastLon, step = baseStep;
+            for (let i = 1; i <= (k_future || 3); i++) { const theta = toRad(randDeg()); curLat += step * Math.cos(theta); curLon += step * Math.sin(theta); points.push({ lat: curLat, lon: curLon, address: 'Predicted Location ' + i }); step *= decay; }
+            const distKm = haversineDistanceKm(user_location.lat, user_location.lon, points[0].lat, points[0].lon);
+            const riskPayload = JSON.stringify({ animal, distance_km: distKm, eventDate: new Date().toISOString(), confidence: 'high', scope: 'regional' });
+            return execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], { cwd: ML_DIR, timeout: 12000, maxBuffer: 1024 * 1024 * 5 }, (err2, out2) => {
+                let riskLevel = 'Medium'; if (!err2 && out2) { try { const rj = JSON.parse(String(out2).trim()); riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium'; } catch {} }
+                const resp = { animal, path: points, risk_level: riskLevel, safety_override: false, distance_to_user_km: distKm, model_used: 'simulation' };
+                console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km, model_used: resp.model_used }));
+                return res.json(resp);
+            });
+        }
+        const pathObjs = predicted.map((p, i) => ({ lat: Number(p[0]), lon: Number(p[1]), address: 'Predicted Location ' + (i + 1) }));
+        const first = pathObjs[0];
+        const distKm = haversineDistanceKm(user_location.lat, user_location.lon, first.lat, first.lon);
+        const safetyOverride = !!parsed?.safety_override;
+        const riskPayload = JSON.stringify({
+            animal,
+            distance_km: distKm,
+            eventDate: new Date().toISOString(),
+            confidence: 'high',
+            scope: 'regional'
+        });
+        execFile(ML_PYTHON_EXE, [ML_PREDICT_SCRIPT, riskPayload], {
+            cwd: ML_DIR,
+            timeout: 12000,
+            maxBuffer: 1024 * 1024 * 5
+        }, (err2, out2, err2stderr) => {
+            let riskLevel = 'Medium';
+            if (err2 || !out2) {
+                if (err2stderr) console.error('[ML-Risk Stderr]:', String(err2stderr).slice(0, 1000));
+                if (err2) console.error('[ML-Risk Error]:', err2.message);
+            } else {
+                try {
+                    const rt = String(out2).trim();
+                    console.log('[ML-Risk RawStdout]:', rt.substring(0, 200));
+                    const rj = JSON.parse(rt);
+                    riskLevel = rj?.risk ?? rj?.risk_level ?? 'Medium';
+                } catch (pe) {
+                    console.error('[ML-Risk ParseError]:', pe.message);
+                }
+            }
+            const resp = {
+                animal,
+                path: pathObjs,
+                risk_level: riskLevel,
+                safety_override: safetyOverride,
+                distance_to_user_km: distKm,
+                model_used: modelLabel
+            };
+            console.log('[Movement] final_response:', JSON.stringify({ len: resp.path.length, risk_level: resp.risk_level, dist_km: resp.distance_to_user_km }));
+            return res.json(resp);
+        });
     });
 });
 

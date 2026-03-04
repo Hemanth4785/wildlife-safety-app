@@ -4,6 +4,7 @@ import { CONFIG } from '../config';
 import { ANIMALS, canonicalScientific, isWithinSouthIndia, SOUTH_INDIA_BOUNDS } from '../constants';
 import wildlifeRecent from '../wildlife_recent.json';
 import { calculateMinDistanceToPolyline } from './geoService';
+import { auth } from './firebase';
 
 let wildlifeAllCache: any[] | null = null;
 let wildlifeAllCacheAt = 0;
@@ -329,12 +330,28 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
                     lon: parseFloat(item.lon),
                     name: item.display_name
                 }))
-                .filter(loc => isWithinSouthIndia(loc.lat, loc.lon)); // Regional Restriction
+                .filter(loc => isWithinSouthIndia(loc.lat, loc.lon));
         }
-        return [];
     } catch (error) {
-        logger.error(`Location search failed for "${query}"`, error);
-        throw new Error("Location search unavailable");
+        logger.warn(`Backend location search failed for "${query}", attempting direct OSM fallback`, error);
+    }
+
+    try {
+        const osmUrl = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=10&q=${encodeURIComponent(query)}`;
+        const res = await fetch(osmUrl, { headers: { 'Accept': 'application/json' } } as any);
+        if (!(res as any)?.ok) return [];
+        const data: any = await (res as any).json();
+        if (!Array.isArray(data)) return [];
+        return data
+            .map((item: any) => ({
+                lat: parseFloat(item.lat),
+                lon: parseFloat(item.lon),
+                name: item.display_name
+            }))
+            .filter((loc: Location) => isWithinSouthIndia(loc.lat, loc.lon));
+    } catch (e) {
+        logger.error(`Location search fallback failed for "${query}"`, e);
+        return [];
     }
 };
 
@@ -458,7 +475,8 @@ export const predictMovement = async (
     animal: string, 
     userLocation: { lat: number, lon: number }, 
     recentPath: [number, number][], 
-    kFuture: number = 3
+    kFuture: number = 3,
+    wildlifeLocation?: { lat: number, lon: number }
 ): Promise<{ 
     animal: string, 
     path: { lat: number, lon: number, address: string }[], 
@@ -485,7 +503,8 @@ export const predictMovement = async (
                 animal,
                 user_location: userLocation,
                 recent_path: recentPath,
-                k_future: kFuture
+                k_future: kFuture,
+                wildlife_location: wildlifeLocation
             })
         }, 3); // 3 retries for ML
 
@@ -702,7 +721,16 @@ export const deleteReport = async (reportId: string | number): Promise<{ status:
     if (!baseUrl) return null;
     const id = String(reportId);
     const url = `${baseUrl}/api/reports/${encodeURIComponent(id)}`;
-    const res = await nativeFetch(url, { method: 'DELETE' });
+    let headers: Record<string, string> = {};
+    try {
+        const uid = auth.currentUser?.uid || '';
+        const email = auth.currentUser?.email || '';
+        headers['x-user-id'] = uid;
+        headers['x-user-email'] = email;
+        const token = await auth.currentUser?.getIdToken?.();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+    } catch {}
+    const res = await nativeFetch(url, { method: 'DELETE', headers });
     return res || null;
 };
 // Helper to process and balance wildlife data
