@@ -9,6 +9,7 @@ import json
 import os
 import warnings
 from datetime import datetime
+from water_distance import get_distance_to_water
 
 # Suppress TensorFlow and other logs (must be set BEFORE importing ML libs)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
@@ -38,6 +39,7 @@ except ImportError as e:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_PATH = os.path.join(BASE_DIR, "risk_models.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "encoders.pkl")
+FEATURE_ORDER_PATH = os.path.join(BASE_DIR, "feature_order.json")
 
 def load_assets():
     """
@@ -69,25 +71,8 @@ def predict_risk(record):
 
     try:
         # 1. Feature Extraction & Validation
-        try:
-            date_val = record.get('eventDate')
-            # Fallback to current time if date is missing or invalid
-            dt_obj = pd.to_datetime(date_val) if date_val else datetime.now()
-            hour = dt_obj.hour
-        except:
-            hour = 12
-            
         dist = float(record.get('distance_km', 0.0))
         animal = record.get('animal', 'unknown')
-        
-        # Handle flat or nested metadata
-        meta = record.get('metadata', {})
-        if isinstance(meta, dict):
-            confidence = meta.get('confidence', record.get('confidence', 'unknown'))
-            scope = meta.get('scope', record.get('scope', 'unknown'))
-        else:
-            confidence = record.get('confidence', 'unknown')
-            scope = record.get('scope', 'unknown')
         
         # 2. Safe Categorical Encoding (matches training pipeline)
         def safe_encode(col, value):
@@ -98,25 +83,65 @@ def predict_risk(record):
             return int(le.transform([target])[0])
 
         animal_enc = safe_encode('animal', animal)
-        conf_enc = safe_encode('confidence', confidence)
-        scope_enc = safe_encode('scope', scope)
-
-        # 3. Model Routing
-        # Use species-specific model if available, otherwise use the 'Generic' model
-        if animal in models and animal != 'unknown':
-            model = models[animal]
-            # Features: [dist, hour, confidence, scope]
-            feature_cols = ['distance_km', 'hour_of_day', 'confidence_encoded', 'scope_encoded']
-            features = pd.DataFrame([[dist, hour, conf_enc, scope_enc]], columns=feature_cols)
-            model_type = "species_specific"
+        
+        # 3. Feature Routing: Prefer Environmental Vector, fallback to Basic
+        feature_order = None
+        try:
+            if os.path.exists(FEATURE_ORDER_PATH):
+                with open(FEATURE_ORDER_PATH, "r", encoding="utf-8") as f:
+                    feature_order = json.load(f)
+        except:
+            feature_order = None
+        
+        lat = record.get('latitude'); lon = record.get('longitude')
+        fd = record.get('forest_density')
+        
+        # Dynamic calculation of distance to water using Overpass API
+        if lat is not None and lon is not None:
+            dwater = get_distance_to_water(float(lat), float(lon))
         else:
-            model = models.get('Generic')
-            if not model:
-                return {"error": "No model found for this animal and no Generic model available.", "status": "failed"}
-            # Generic Features: [animal, dist, hour, confidence, scope]
-            feature_cols = ['animal_encoded', 'distance_km', 'hour_of_day', 'confidence_encoded', 'scope_encoded']
-            features = pd.DataFrame([[animal_enc, dist, hour, conf_enc, scope_enc]], columns=feature_cols)
-            model_type = "generic_fallback"
+            dwater = record.get('distance_to_water')
+            
+        droad = record.get('distance_to_road'); pop = record.get('human_population')
+        elev = record.get('elevation')
+        has_env = all(x is not None for x in [lat, lon, fd, dwater, droad, pop, elev])
+        
+        if has_env and ('Generic' in models):
+            model = models['Generic']
+            env_cols = ['animal_encoded','latitude','longitude','forest_density','distance_to_water','distance_to_road','human_population','elevation','distance_km']
+            # Use feature_order.json if available
+            if feature_order and 'generic' in feature_order:
+                env_cols = feature_order['generic']
+            vals = {
+                'animal_encoded': animal_enc,
+                'latitude': float(lat),
+                'longitude': float(lon),
+                'forest_density': float(fd),
+                'distance_to_water': float(dwater),
+                'distance_to_road': float(droad),
+                'human_population': float(pop),
+                'elevation': float(elev),
+                'distance_km': float(dist)
+            }
+            row = [vals.get(c, 0.0) for c in env_cols]
+            features = pd.DataFrame([row], columns=env_cols)
+            model_type = "random_forest_environmental"
+        elif 'Basic' in models:
+            model = models['Basic']
+            basic_cols = ['animal_encoded','distance_km']
+            if feature_order and 'basic' in feature_order:
+                basic_cols = feature_order['basic']
+            features = pd.DataFrame([[animal_enc, dist]], columns=basic_cols)
+            model_type = "random_forest_basic"
+        else:
+            # Fallback: if per-species exists, use it; else error
+            if animal in models and animal != 'unknown':
+                model = models[animal]
+                species_cols = ['distance_km'] + ([] if feature_order is None else [])
+                features = pd.DataFrame([[dist]], columns=['distance_km'])
+                model_type = "species_specific"
+            else:
+                return {"error": "No suitable model available", "status": "failed"}
 
         # 4. Inference
         risk_class = model.predict(features)[0]
@@ -136,27 +161,28 @@ def predict_risk(record):
         return {"error": f"Inference runtime error: {str(e)}", "status": "failed"}
 
 if __name__ == "__main__":
-    # Handle input from both stdin (preferred for Node.js) and argv (for manual testing)
+    # Strict argv-only input handling to avoid stdin hangs
     try:
-        if len(sys.argv) > 1:
-            # Manual test: python predict_risk.py '{"animal": "Tiger", ...}'
-            input_data = json.loads(sys.argv[1])
-        else:
-            # Production: Node.js spawnSync sends data via stdin
-            # Using read() to ensure we get all data before parsing
-            raw_input = sys.stdin.read()
-            if not raw_input:
-                print(json.dumps({"error": "No input received via stdin", "status": "failed"}))
-                sys.stdout.flush()
-                sys.exit(1)
-            input_data = json.loads(raw_input)
-            
-        result = predict_risk(input_data)
-        # Final output MUST be a single line of valid JSON
+        if len(sys.argv) < 2:
+            print(json.dumps({"status": "error", "message": "missing input"}))
+            sys.stdout.flush()
+            sys.exit(1)
+        try:
+            payload = json.loads(sys.argv[1])
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+            sys.stdout.flush()
+            sys.exit(1)
+        # Minimal field extraction (optional): ensure primary fields exist
+        _animal = payload.get("animal")
+        _distance = payload.get("distance_km")
+        # Run prediction
+        result = predict_risk(payload)
+        # Always print single-line JSON and exit quickly
         print(json.dumps(result))
         sys.stdout.flush()
-        sys.exit(0) # Explicit exit to prevent hanging
+        sys.exit(0)
     except Exception as e:
-        print(json.dumps({"error": f"Invalid JSON input or runtime error: {str(e)}", "status": "failed"}))
+        print(json.dumps({"status": "error", "message": f"runtime error: {str(e)}"}))
         sys.stdout.flush()
-        sys.exit(1) # Exit with error status
+        sys.exit(1)

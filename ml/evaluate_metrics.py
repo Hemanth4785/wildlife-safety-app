@@ -31,7 +31,7 @@ def evaluate_model():
     # a single model evaluation is clearer. 
     # Let's evaluate the Generic model approach which uses 'animal_encoded'.
 
-    generic_features = ['animal_encoded'] + model_wrapper.feature_cols
+    generic_features = ['animal_encoded'] + model_wrapper.env_feature_cols
     X = df[generic_features]
     y = df['risk_label']
 

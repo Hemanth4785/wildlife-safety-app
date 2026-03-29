@@ -1,5 +1,5 @@
 import React from 'react';
-import { AvatarTigerIcon, AvatarElephantIcon, AvatarBisonIcon, AvatarLeopardIcon, AvatarBearIcon, AvatarRhinoIcon } from './components/icons';
+import { AvatarTigerIcon, AvatarElephantIcon, AvatarBisonIcon, AvatarLeopardIcon, AvatarBearIcon } from './components/icons';
 
 export const RADIUS_KM = 50; // Search radius for initial sightings
 export const NEARBY_KM = 5;  // Radius for "nearby" alerts on the map
@@ -40,8 +40,6 @@ export const ANIMALS: Record<string, AnimalInfo> = {
     'Bison bison': { common: 'Bison', emoji: '🦬', color: '#334155' },
     'Panthera tigris': { common: 'Tiger', emoji: '🐅', color: '#dc2626' },
     'Melursus ursinus': { common: 'Sloth Bear', emoji: '🐻', color: '#78350f' },
-    // Added Rhino for completeness if needed by other features
-    'Rhinoceros unicornis': { common: 'Rhino', emoji: '🦏', color: '#4b5563' },
 };
 
 export const SPECIES_IMAGES: Record<string, string> = {
@@ -50,8 +48,7 @@ export const SPECIES_IMAGES: Record<string, string> = {
     'Bos gaurus': 'https://upload.wikimedia.org/wikipedia/commons/1/16/Bos_gaurus_in_Kaziranga.jpg',
     'Bison bison': 'https://upload.wikimedia.org/wikipedia/commons/6/6f/American_bison_k5680-1.jpg',
     'Elephas maximus': 'https://upload.wikimedia.org/wikipedia/commons/5/5f/Elephas_maximus_-_Royal_Botanic_Gardens%2C_Sydney_-_April_2023.jpg',
-    'Melursus ursinus': 'https://upload.wikimedia.org/wikipedia/commons/8/8e/Melursus_ursinus.jpg',
-    'Rhinoceros unicornis': 'https://upload.wikimedia.org/wikipedia/commons/8/85/Indian_Rhinoceros.jpg'
+    'Melursus ursinus': 'https://upload.wikimedia.org/wikipedia/commons/8/8e/Melursus_ursinus.jpg'
 };
 
 export const canonicalScientific = (name: string): string => {
@@ -72,5 +69,4 @@ export const AVATARS: Record<string, Avatar> = {
     'bison': { id: 'bison', name: 'Bison', icon: AvatarBisonIcon },
     'leopard': { id: 'leopard', name: 'Leopard', icon: AvatarLeopardIcon },
     'bear': { id: 'bear', name: 'Bear', icon: AvatarBearIcon },
-    'rhino': { id: 'rhino', name: 'Rhino', icon: AvatarRhinoIcon },
 };

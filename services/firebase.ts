@@ -35,11 +35,11 @@ if (Platform.OS === 'web') {
 }
 
 export { auth };
-export const db = Platform.OS === 'web'
-  ? getFirestore(app)
-  : initializeFirestore(app, { experimentalForceLongPolling: true });
+export const db = initializeFirestore(app, { 
+  experimentalForceLongPolling: true 
+});
 
 console.log("Firebase Auth Persistence initialized");
-console.log("Firestore Persistence enabled by default");
+console.log("Firestore initialized with Long Polling");
 
 export default app;

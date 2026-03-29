@@ -4,23 +4,10 @@ import Constants from 'expo-constants';
  * Single source of truth for API configuration.
  * In Expo Go, we prefer Constants.expoConfig.extra which is injected via app.config.js
  */
+export const API_BASE_URL = "http://10.18.247.199:3000";
+
 export const getApiBaseUrl = (): string => {
-    // Standard pattern for Expo Go
-    const configUrl = Constants.expoConfig?.extra?.API_BASE_URL;
-    
-    if (!configUrl) {
-        console.warn("[Config] API_BASE_URL is not defined in Expo extra config!");
-        return "";
-    }
-
-    let url = configUrl;
-
-    // Clean up trailing slash
-    if (url.endsWith('/')) {
-        url = url.slice(0, -1);
-    }
-    
-    return url;
+    return API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
 };
 
 const getExtra = (key: string, fallback: string = ""): string => {

@@ -1,1 +1,1 @@
-{"per_animal": ["distance_km", "hour_of_day", "confidence_encoded", "scope_encoded"], "generic": ["animal_encoded", "distance_km", "hour_of_day", "confidence_encoded", "scope_encoded"]}
+{"per_animal": ["latitude", "longitude", "forest_density", "distance_to_water", "distance_to_road", "human_population", "elevation", "distance_km"], "generic": ["animal_encoded", "latitude", "longitude", "forest_density", "distance_to_water", "distance_to_road", "human_population", "elevation", "distance_km"], "basic": ["animal_encoded", "distance_km"]}

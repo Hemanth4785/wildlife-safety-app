@@ -169,7 +169,10 @@ def predict(input_data):
             safety_override = True
             break
             
-    return {"animal": animal, "predicted_path": chosen, "risk_level": risk, "distance_to_user_km": round(float(dist_km), 3), "model_used": "maxent_plus_history", "safety_override": safety_override, "status": "success"}
+    # Calculate average suitability score for the chosen points
+    avg_suitability = float(np.mean([score for (pt, score) in ranked[:k]])) if chosen else 0.5
+            
+    return {"animal": animal, "predicted_path": chosen, "suitability": avg_suitability, "risk_level": risk, "distance_to_user_km": round(float(dist_km), 3), "model_used": "maxent_plus_history", "safety_override": safety_override, "status": "success"}
 
 if __name__ == "__main__":
     try:

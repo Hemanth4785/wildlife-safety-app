@@ -310,13 +310,3 @@ export const AvatarBearIcon: React.FC<IconProps> = ({ width = 100, height = 100 
     <Path d="M70 35C75 25 65 20 60 28" fill="#522204"/>
   </Svg>
 );
-
-export const AvatarRhinoIcon: React.FC<IconProps> = ({ width = 100, height = 100 }) => (
-  <Svg width={width} height={height} viewBox="0 0 100 100" fill="none">
-    <Circle cx="50" cy="50" r="50" fill="#4B5563"/>
-    <Rect x="25" y="40" width="50" height="30" rx="15" fill="#6B7280"/>
-    <Circle cx="40" cy="55" r="4" fill="#111827"/>
-    <Path d="M65 40C65 40 75 30 70 25C65 20 60 38 65 40Z" fill="#9CA3AF"/>
-    <Path d="M28 35C22 30 25 25 32 28" fill="#6B7280"/>
-  </Svg>
-);

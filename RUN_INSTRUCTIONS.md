@@ -81,7 +81,7 @@ npm install
 # Start the server
 node backend/index.js
 ```
-*Server runs on: `http://10.151.200.199:3000` (your LAN IP)*
+*Server runs on: `http://10.18.247.199:3000` (your LAN IP)*
 
 ### Terminal 2: Mobile/Web Frontend
 Starts the Expo development server.
@@ -99,3 +99,22 @@ npx expo start --offline
 *   **"TensorFlow not installed" error:** Ensure `lstm_env` was created with Python 3.10 and you installed `ml/requirements.txt` inside it.
 *   **Mobile App "Connecting to backend...":** Ensure your phone and computer are on the same Wi-Fi. The app uses your computer's LAN IP.
 *   **"Degraded" Prediction Mode:** This happens if the ML model crashes. Check the Backend Terminal logs for Python errors.
+
+---
+
+## 4. Machine Learning Pipeline Logic
+
+The system uses an integrated model strategy for movement prediction and risk assessment:
+
+### Movement Prediction (LSTM)
+*   **Predictor:** LSTM Sequence Model (`predict_lstm_seq.py`)
+*   **Workflow:** Trajectory Prediction → Feature Fusion → Risk Classification
+*   **Logic:** The system relies exclusively on the LSTM model to forecast future animal coordinates. If movement history is sparse, the model uses padding to ensure a stable prediction.
+
+### Habitat Suitability (MaxEnt)
+*   **Predictor:** MaxEnt Model (`predict_maxent.py`)
+*   **Logic:** MaxEnt is used specifically to calculate a **Habitat Suitability Score**. This score represents how likely an animal is to be comfortable in the predicted area, but it is no longer used for path generation.
+
+### Final Step: Risk Classification (Random Forest)
+The predicted coordinates from the LSTM model and the suitability score from MaxEnt, along with environmental features (forest density, distance to water, human population, etc.), are passed to the **Random Forest** model (`predict_risk.py`) to classify the conflict risk as **LOW**, **MEDIUM**, or **HIGH**.
+

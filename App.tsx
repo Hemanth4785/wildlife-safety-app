@@ -176,9 +176,12 @@ const AppContent: React.FC = () => {
              </RNView>
 
              <RNView style={viewStyle(currentView === View.GUIDE)} pointerEvents={viewPointerEvents(currentView === View.GUIDE)}>
-                 <GuideView onOpenRouteLink={(startQuery, destQuery) => {
-                     setRouteIntent({ start: startQuery, end: destQuery });
-                     setCurrentView(View.MAP);
+                 <GuideView 
+                    recentSightings={recentSightings}
+                    riskZones={riskZones}
+                    onOpenRouteLink={(startQuery, destQuery) => {
+                        setRouteIntent({ start: startQuery, end: destQuery });
+                        setCurrentView(View.MAP);
                  }} />
              </RNView>
 

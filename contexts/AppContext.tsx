@@ -279,6 +279,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         timestamp: new Date().toISOString(),
         userId: uid || undefined,
         userEmail: email || undefined,
+        isObservation: true,
+        source: "user_report"
       };
       
       setReports((prev) => {
@@ -300,7 +302,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           location: (newReport as any).location || '',
           imageUri: (newReport as any).imageUri || null,
           ai: (newReport as any).ai || null,
-          created_at: newReport.timestamp
+          created_at: newReport.timestamp,
+          isObservation: true,
+          source: "user_report"
         };
         await setDoc(doc(db, 'reports', String(newReport.id)), data, { merge: true });
       } catch (e) {

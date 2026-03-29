@@ -112,6 +112,8 @@ export interface Report {
     lon?: number;
     userId?: string;
     userEmail?: string;
+    isObservation?: boolean;
+    source?: string;
     createdAt?: any;
     created_at?: string;
     ai?: {

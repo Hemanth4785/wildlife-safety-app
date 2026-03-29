@@ -53,7 +53,7 @@ const PredictionPanel: React.FC<PredictionPanelProps> = ({
                 </Text>
             </View>
 
-            <Text style={styles.subTitle}>Predicted Path (Next 30–45 mins)</Text>
+            <Text style={styles.subTitle}>Predicted Wildlife Movement</Text>
 
             <ScrollView
                 style={styles.scrollList}

@@ -1,0 +1,99 @@
+{
+  "mud": [
+    {
+      "lat": "31.9590016",
+      "lon": "78.0324114",
+      "display_name": "Mud, Spiti, Lahaul and Spiti, Himachal Pradesh, India"
+    },
+    {
+      "lat": "33.2015519",
+      "lon": "78.6950008",
+      "display_name": "Mudh, Leh district, Ladakh, 194404, India"
+    },
+    {
+      "lat": "28.7597071",
+      "lon": "77.5073761",
+      "display_name": "Murad Nagar, Railway Road, Ukhlarsi, Muradnagar, Modinagar, Ghaziabad, Uttar Pradesh, 201206, India"
+    },
+    {
+      "lat": "33.2239776",
+      "lon": "78.3389562",
+      "display_name": "Mud volcano, Leh district, Ladakh, India"
+    },
+    {
+      "lat": "33.2225511",
+      "lon": "78.3316512",
+      "display_name": "Mud volcano area, Leh district, Ladakh, India"
+    },
+    {
+      "lat": "13.4149241",
+      "lon": "92.8930159",
+      "display_name": "Mud Volcano, Diglipur, North and Middle Andaman, Andaman and Nicobar Islands, India"
+    }
+  ],
+  "mudumalai": [
+    {
+      "lat": "11.6191251",
+      "lon": "76.4745850",
+      "display_name": "Mudumalai National Park, Gudalur, Nilgiris, Tamil Nadu, 643223, India"
+    }
+  ],
+  "muf": [],
+  "mufumalai": [],
+  "mudumala": [
+    {
+      "lat": "15.8736313",
+      "lon": "77.7606953",
+      "display_name": "Mudumala, C.Belagal, Kurnool, Andhra Pradesh, 518462, India"
+    },
+    {
+      "lat": "14.9075888",
+      "lon": "78.9219767",
+      "display_name": "Mudumala, Brahmamgarimattam, YSR Kadapa, Andhra Pradesh, India"
+    }
+  ],
+  "ooty": [
+    {
+      "lat": "11.4126769",
+      "lon": "76.7030504",
+      "display_name": "Udhagamandalam, Nilgiris, Tamil Nadu, 643001, India"
+    }
+  ],
+  "mudu": [
+    {
+      "lat": "13.3129085",
+      "lon": "74.7804376",
+      "display_name": "Mudu Alevuru, Udupi taluku, Udupi, Karnataka, 567104, India"
+    },
+    {
+      "lat": "17.8233914",
+      "lon": "79.7214478",
+      "display_name": "Mudu Thanda, Parvathagiri mandal, Warangal, Telangana, India"
+    },
+    {
+      "lat": "13.6559906",
+      "lon": "74.7989055",
+      "display_name": "Government Higher Primary School, Mudu Valthur., Kolluru Road, Kavaradi, Ampar, Kundapura, Udupi, Karnataka, India"
+    }
+  ],
+  "mudum": [],
+  "chennai": [
+    {
+      "lat": "13.0836939",
+      "lon": "80.2701860",
+      "display_name": "Chennai, Tamil Nadu, India"
+    },
+    {
+      "lat": "13.0008413",
+      "lon": "80.2023035",
+      "display_name": "Chennai, Tamil Nadu, India"
+    }
+  ],
+  "arakkonam": [
+    {
+      "lat": "13.0839782",
+      "lon": "79.6700892",
+      "display_name": "Arakkonam, Arakonam, Ranipet, Tamil Nadu, 631001, India"
+    }
+  ]
+}

@@ -1066,13 +1066,26 @@ const MapView: React.FC<MapViewProps> = (props) => {
                     })}
                     {processedSafePlaces.map(place => <SafePlaceMarker key={place.id} place={place} distanceStr={place.distanceStr} durationStr={place.durationStr} />)}
                     
-                    {/* Animal markers: near route only (riskZones) when we have a route; else recent sightings */}
-                    {safeRoute && riskZones.length > 0
-                        ? riskZones.map((zone, idx) => {
-                            const lat = typeof zone.lat === 'number' ? zone.lat : parseFloat(zone.lat);
-                            const lon = typeof zone.lon === 'number' ? zone.lon : parseFloat(zone.lon);
+                    {/* Animal markers: Combine risk zones and recent sightings to ensure visibility */}
+                    {(() => {
+                        const combined = [...(recentSightings || [])];
+                        if (Array.isArray(riskZones)) {
+                            riskZones.forEach(zone => {
+                                const isDuplicate = combined.some(s => 
+                                    (s.id && s.id === zone.id) || 
+                                    (Math.abs(s.lat - zone.lat) < 0.0001 && Math.abs(s.lon - zone.lon) < 0.0001)
+                                );
+                                if (!isDuplicate) {
+                                    combined.push(zone);
+                                }
+                            });
+                        }
+                        
+                        return combined.map((sighting, idx) => {
+                            const lat = typeof sighting.lat === 'number' ? sighting.lat : parseFloat(sighting.lat);
+                            const lon = typeof sighting.lon === 'number' ? sighting.lon : parseFloat(sighting.lon);
                             if (isNaN(lat) || isNaN(lon)) return null;
-                            const emoji = zone.emoji || '🐾';
+                            const emoji = sighting.emoji || '🐾';
                             const icon = new L.DivIcon({
                                 html: `<div class="text-2xl" style="text-shadow:0 0 4px white">${emoji}</div>`,
                                 className: 'leaflet-div-icon',
@@ -1080,32 +1093,17 @@ const MapView: React.FC<MapViewProps> = (props) => {
                                 iconAnchor: [14, 14],
                             });
                             return (
-                                <Marker key={`risk-${zone.scientific_name}-${idx}-${lat}-${lon}`} position={[lat, lon]} icon={icon}>
+                                <Marker key={`sighting-${sighting.id || idx}-${lat}-${lon}`} position={[lat, lon]} icon={icon}>
                                     <Popup>
-                                        <b>{zone.name ?? zone.scientific_name ?? 'Wildlife'}</b><br/>
-                                        <small>{zone.distanceToRoute != null ? `${zone.distanceToRoute.toFixed(1)} km from route` : ''}</small>
+                                        <b>{sighting.name ?? sighting.scientific_name ?? 'Wildlife'}</b><br/>
+                                        <small>{sighting.date || ''}</small>
+                                        {sighting.address && <><br/><small>{sighting.address}</small></>}
+                                        {sighting.distanceToRoute != null && <><br/><small>{sighting.distanceToRoute.toFixed(1)} km from route</small></>}
                                     </Popup>
                                 </Marker>
                             );
-                          })
-                        : recentSightings.map((sighting) => (
-                            <Marker
-                                key={sighting.id}
-                                position={[sighting.lat, sighting.lon]}
-                                icon={new L.DivIcon({
-                                    html: `<div class="text-2xl" style="text-shadow:0 0 4px white">${sighting.emoji || '🐾'}</div>`,
-                                    className: 'leaflet-div-icon',
-                                    iconSize: [28, 28],
-                                    iconAnchor: [14, 14],
-                                })}
-                            >
-                                <Popup>
-                                    <b>{sighting.name}</b><br/>
-                                    <small>Seen: {sighting.date}</small>
-                                    {sighting.address && <><br/><small>{sighting.address}</small></>}
-                                </Popup>
-                            </Marker>
-                        ))}
+                        });
+                    })()}
 
                     {isNavigating && navigationStats && <NavigationInfoPanel stats={navigationStats} onStop={onStopNavigation} />}
                     {showWeatherOverlay && <WeatherRadarOverlay />}
@@ -1148,6 +1146,35 @@ const MapView: React.FC<MapViewProps> = (props) => {
                         </>
                     )}
                 </MapContainer>
+                {/* Prediction Card overlay */}
+                {movementPrediction && movementPrediction.predicted_path.length > 0 && (
+                    <div className="absolute left-4 right-4 bottom-24 md:left-6 md:right-auto md:bottom-6 md:w-[360px] bg-white rounded-xl shadow-2xl border border-gray-200 p-4 z-[1000]">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-700">🧭</span>
+                                <h3 className="text-base md:text-lg font-semibold text-gray-800">Wildlife Movement Prediction</h3>
+                            </div>
+                            <button
+                                onClick={() => setMovementPrediction(null)}
+                                className="text-gray-400 hover:text-gray-600 transition-colors"
+                                aria-label="Close prediction card"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="space-y-1">
+                            {movementPrediction.predicted_path.map((p, i) => (
+                                <div key={`pred-card-${i}`} className="text-sm text-gray-700">
+                                    <span className="inline-block w-16 text-gray-500">Step {i + 1}:</span>
+                                    <span>{p.lat.toFixed(4)}, {p.lon.toFixed(4)}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-3 text-xs text-gray-500">
+                            Model: LSTM sequence • Risk: {movementPrediction.risk_level}
+                        </div>
+                    </div>
+                )}
                 <div className="absolute bottom-4 right-4 z-[1000]">
                     <button
                         onClick={isPlaying ? onPause : onPlay}

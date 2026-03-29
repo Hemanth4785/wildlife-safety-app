@@ -1,6 +1,6 @@
 import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
-import { CONFIG } from '../config';
+import { API_BASE_URL, CONFIG } from '../config';
 import { ANIMALS, canonicalScientific, isWithinSouthIndia, SOUTH_INDIA_BOUNDS } from '../constants';
 import wildlifeRecent from '../wildlife_recent.json';
 import { calculateMinDistanceToPolyline } from './geoService';
@@ -11,11 +11,8 @@ let wildlifeAllCacheAt = 0;
 
 // Helper to get API Base URL
 const getApiBaseUrl = (): string | null => {
-    // Dynamically call the getter to avoid stale values
-    const url = CONFIG.API_BASE_URL;
-    if (url) {
-        // No longer logging every time to avoid clutter
-    } else {
+    const url = API_BASE_URL;
+    if (!url) {
         logger.warn('[API] API_BASE_URL is missing!');
     }
     return url;
@@ -338,7 +335,10 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
 
     try {
         const osmUrl = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=10&q=${encodeURIComponent(query)}`;
-        const res = await fetch(osmUrl, { headers: { 'Accept': 'application/json' } } as any);
+        const res = await fetch(osmUrl, { 
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(10000) // 10s timeout for OSM
+        } as any);
         if (!(res as any)?.ok) return [];
         const data: any = await (res as any).json();
         if (!Array.isArray(data)) return [];
@@ -349,8 +349,12 @@ export const searchLocations = async (query: string): Promise<Location[]> => {
                 name: item.display_name
             }))
             .filter((loc: Location) => isWithinSouthIndia(loc.lat, loc.lon));
-    } catch (e) {
-        logger.error(`Location search fallback failed for "${query}"`, e);
+    } catch (e: any) {
+        logger.error(`Location search fallback (OSM) failed for "${query}"`, e);
+        if (e.message?.includes('Network request failed')) {
+            // Throwing a more descriptive error for the UI
+            throw new Error(`Internet connection required for location search. (Query: ${query})`);
+        }
         return [];
     }
 };
@@ -521,7 +525,92 @@ export const predictMovement = async (
             };
         }
 
-        return response;
+        // Normalize backend formats:
+        // - If backend returned predicted_locations, convert to path used by UI
+        // - Ensure address uses the human-readable 'location' field
+        if (Array.isArray(response?.predicted_locations)) {
+            const path = response.predicted_locations
+                .slice(0, 3)
+                .map((p: any) => ({
+                    lat: Number(p.lat),
+                    lon: Number(p.lon),
+                    address: String(p.location || 'Unknown wildlife area')
+                }))
+                .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+            const predicted_path = path.map((p: { lat: number; lon: number; address?: string }) => ({ latitude: p.lat, longitude: p.lon }));
+            return {
+                animal,
+                path,
+                predicted_path,
+                risk_level: response.risk_level || "Medium",
+                safety_override: !!response.safety_override,
+                distance_to_user_km: response.distance_to_user_km,
+                status: 'ok',
+                degraded: false,
+                message: undefined
+            } as any;
+        }
+        // New format: predicted_positions only (no addresses). Map to path with placeholder address
+        if (Array.isArray(response?.predicted_positions)) {
+            let path = response.predicted_positions
+                .slice(0, 3)
+                .map((p: any) => ({
+                    lat: Number(p.lat),
+                    lon: Number(p.lon),
+                    address: 'Unknown wildlife area'
+                }))
+                .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+            try {
+                const names = await Promise.all(path.map((p: any) => reverseGeocode(p.lat, p.lon)));
+                path = path.map((p: any, i: number) => ({ ...p, address: String(names[i] || 'Unknown wildlife area') }));
+            } catch {}
+            const predicted_path = path.map((p: { lat: number; lon: number; address?: string }) => ({ latitude: p.lat, longitude: p.lon }));
+            try { console.log("Predictions received:", response.predicted_positions); } catch {}
+            return {
+                animal,
+                path,
+                predicted_path,
+                risk_level: response.risk_level || "Medium",
+                safety_override: !!response.safety_override,
+                distance_to_user_km: response.distance_to_user_km,
+                status: response?.status || 'ok',
+                degraded: false,
+                message: undefined
+            } as any;
+        }
+
+        // Legacy format where backend returns { path: [...] }
+        if (Array.isArray(response?.path)) {
+            const path = response.path.map((p: any) => ({
+                lat: Number(p.lat),
+                lon: Number(p.lon),
+                address: String(p.address || '')
+            }));
+            const predicted_path = path.map((p: { lat: number; lon: number; address?: string }) => ({ latitude: p.lat, longitude: p.lon }));
+            return {
+                animal,
+                path,
+                predicted_path,
+                risk_level: response.risk_level || "Medium",
+                safety_override: !!response.safety_override,
+                distance_to_user_km: response.distance_to_user_km,
+                status: 'ok',
+                degraded: false,
+                message: undefined
+            } as any;
+        }
+
+        // Unexpected format: return safe default
+        return {
+            animal,
+            path: [],
+            risk_level: "Medium",
+            safety_override: false,
+            distance_to_user_km: 0,
+            status: 'degraded',
+            degraded: true,
+            message: "Invalid prediction response"
+        };
     } catch (error: any) {
         logger.error("Failed to predict movement", error);
         return {
@@ -537,19 +626,44 @@ export const predictMovement = async (
     }
 };
 
+/**
+ * Route Risk Prediction API
+ * Evaluates wildlife risk for a polyline route using backend hybrid risk logic.
+ */
+export const predictRouteRisk = async (
+    routeCoords: Array<[number, number]>
+): Promise<{ routeRisk: 'LOW' | 'MEDIUM' | 'HIGH' | string; probability: number; animalsDetected?: string[]; predictionSources?: string[] } | null> => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) return null;
+    const url = `${baseUrl}/api/predict-wildlife-risk`;
+    try {
+        const body = { route_coordinates: routeCoords.map(([lat, lon]) => [Number(lat), Number(lon)]) };
+        const res = await nativeFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }, 1);
+        if (!res || res.error) return null;
+        return res as any;
+    } catch (e) {
+        logger.error('predictRouteRisk failed', e);
+        return null;
+    }
+};
+
 export const getAIGuideResponse = async (
     history: ChatMessage[],
-    images?: { mimeType: string; data: string }[]
+    images?: { mimeType: string; data: string }[],
+    context?: string
 ): Promise<string> => {
     try {
-        const geminiKey = CONFIG.GEMINI_API_KEY;
-        const geminiModel = CONFIG.GEMINI_MODEL;
-        const openaiKey = CONFIG.OPENAI_API_KEY;
-        const openaiModel = CONFIG.OPENAI_MODEL;
+        const baseUrl = getApiBaseUrl();
+        if (!baseUrl) return "Backend server not connected.";
 
         const speciesList = Object.entries(ANIMALS).map(([sci, info]) => `${info.common} (${sci})`).join(', ');
         const sys = `You are the AI Wildlife Safety Guide for the Wildlife Safety app.
 Project species: ${speciesList}.
+${context ? `IMPORTANT: Use this real-time data from the map to answer the user's questions: ${context}` : 'The map currently shows no recent sightings.'}
 Respond using these sections:
 - Risk Summary: Low/Medium/High and 1–2 relevant species.
 - Movement Forecast: short forecast near the user.
@@ -557,114 +671,38 @@ Respond using these sections:
 - Safety Actions: 4–6 steps tailored to walk/car/bike.
 - Route Tip: detours or timing to reduce risk.
 Rules:
+- Prioritize using the "Current Context" data provided above.
 - Only reference the above species; if uncertain, state uncertainty.
 - Never provide poaching/hunting/trapping instructions.
-- Be concise and local.`;
-        const geminiHistory = history.map((m) => ({
-            role: m.role, // 'user' or 'model' (Gemini expects these)
-            text: m.text
-        }));
-        const openaiHistory = history.map((m) => ({
-            role: m.role === 'model' ? 'assistant' : 'user', // OpenAI expects 'assistant'
-            text: m.text
-        }));
+- Be concise and local.
+- Avoid markdown (no asterisks, no bolding, no code fences) as it will not render correctly in the app. Use plain text formatting.`;
 
-        if (geminiKey) {
-            const contents = [
-                { role: 'user', parts: [{ text: sys }] },
-                ...geminiHistory.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
-                ...(Array.isArray(images) && images.length > 0
-                    ? [{ role: 'user', parts: images.map(img => ({ inline_data: { mime_type: img.mimeType, data: img.data } })) }]
-                    : [])
-            ];
-            const tryModel = async (model: string): Promise<{ ok: boolean; text?: string; status?: number; raw?: any }> => {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents,
-                        generationConfig: {
-                            temperature: 0.15,
-                            topP: 0.9,
-                            maxOutputTokens: 800
-                        }
-                    })
-                });
-                if (!res.ok) {
-                    let raw: any = null;
-                    try { raw = await res.json(); } catch { raw = await res.text().catch(() => null); }
-                    return { ok: false, status: res.status, raw };
-                }
-                const data = await res.json();
-                const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                return { ok: true, text };
-            };
-            const candidates = [geminiModel, 'gemini-1.5-flash-latest', 'gemini-1.5-pro-latest', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-            for (const m of candidates) {
-                for (let i = 0; i < 3; i++) {
-                    const attempt = await tryModel(m);
-                    if (attempt.ok && attempt.text) {
-                        return attempt.text;
-                    }
-                    const s = attempt.status || 0;
-                    if (s === 404) break;
-                    if (s === 429 || s === 500 || s === 503) {
-                        const d = Math.min(1000 * Math.pow(2, i), 4000);
-                        await new Promise(r => setTimeout(r, d));
-                        continue;
-                    }
-                    break;
-                }
-            }
+        const response = await fetch(`${baseUrl}/api/gemini/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                history: history.slice(-10), // Send last 10 messages for context
+                images,
+                systemPrompt: sys
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.details || err.error || 'Server error');
         }
 
-        const last = history.filter(h => h.role === 'user').slice(-1)[0]?.text?.toLowerCase() || '';
-        const hasImage = Array.isArray(images) && images.length > 0;
-        if (geminiKey && hasImage) {
-            return "Based on the photo, stay 50+ meters away, avoid eye contact, and back away calmly. Do not feed or provoke. Report the sighting with location and time. Keep children and pets close.";
-        }
-        if (geminiKey && ((last.includes('route') || last.includes('navigate')) || (last.includes('ooty') && last.includes('masinagudi')))) {
-            return "Use the Map → Route Planner. Prefer well-lit roads and avoid dense forest at dusk/dawn. Keep 1–2 km buffer from recent sightings. If risk is high, delay or pick a detour.";
-        }
-        if (geminiKey && (last.includes('nearby') || last.includes('risk'))) {
-            return "Nearby risk: watch for elephant and tiger zones. Move slowly, make noise, and avoid thick brush. If animals are seen, increase distance and choose an alternate path.";
-        }
-        if (geminiKey) {
-            const routeCtx = [...history].reverse().find(h => h.role === 'model' && h.text.startsWith('Route plan:'));
-            const areaCtx = [...history].reverse().find(h => h.role === 'model' && h.text.startsWith('Area check:'));
-            const photoCtx = [...history].reverse().find(h => h.role === 'model' && h.text.startsWith('Photo analysis:'));
-            const routeTip = routeCtx ? routeCtx.text : '';
-            const areaTip = areaCtx ? areaCtx.text : '';
-            const photoTip = photoCtx ? photoCtx.text : '';
-            let speciesList = '';
-            if (areaTip) {
-                const m = areaTip.match(/Recent nearby wildlife:\s(.+?)\swithin/i);
-                speciesList = m?.[1] || '';
-            }
-            let safePlaces = '';
-            if (routeTip) {
-                const sm = routeTip.match(/Nearby safe places:\s(.+)$/i);
-                safePlaces = sm?.[1] || '';
-            }
-            const riskLevel = routeTip.includes('risky segments: 0') && routeTip.includes('Risk zones: 0') ? 'Low' : 'Medium';
-            const lines = [
-                `Risk Summary: ${riskLevel}. Species: ${speciesList || 'Elephant, Tiger (general caution)'}.`,
-                `Movement Forecast: Movement likely near forest edges; avoid dense brush.`,
-                `Nearby Species: ${speciesList || 'Elephant, Tiger'} — maintain distance; avoid provoking.`,
-                `Safety Actions:`,
-                `- Keep 50+ meters distance and move slowly`,
-                `- Prefer daylight and well-used paths`,
-                `- Do not feed or approach wildlife`,
-                `- Use safe places: ${safePlaces || 'Police/Forest offices where available'}`,
-                `Route Tip: ${routeTip || 'Use Route Planner; detour around recent sightings'}`
-            ];
-            return lines.join('\n');
-        }
-        return 'AI Guide is not configured. Set EXPO_PUBLIC_GEMINI_API_KEY.';
+        const data = await response.json();
+        return data.text || "I'm sorry, I couldn't generate a response.";
     } catch (error: any) {
         logger.error('AI Guide error', error);
-        return "I'm sorry, I cannot respond right now.";
+        
+        // Fallback for when backend is down or API fails
+        const last = history.filter(h => h.role === 'user').slice(-1)[0]?.text?.toLowerCase() || '';
+        if (last.includes('elephant')) return "Elephants are common here. Stay 50m away, avoid noise, and stay in your vehicle.";
+        if (last.includes('tiger')) return "Tiger spotted recently. Avoid night travel and stay inside your vehicle at all times.";
+        
+        return "I'm having trouble connecting to the AI guide. Please ensure the backend server is running and your Gemini API key is set in the .env file.";
     }
 };
 
