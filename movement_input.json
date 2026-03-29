@@ -1,0 +1,6 @@
+{
+  "animal": "Gaur",
+  "user_location": { "lat": 12.5, "lon": 76.5 },
+  "recent_path": [[12.5, 76.5], [12.5005, 76.5005]],
+  "k_future": 3
+}
