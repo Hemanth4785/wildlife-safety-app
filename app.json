@@ -48,7 +48,9 @@
         {
           "microphonePermission": "Allow Wildlife Safety to use the microphone for voice input.",
           "speechRecognitionPermission": "Allow Wildlife Safety to recognize your speech.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ]
     ],
@@ -58,7 +60,12 @@
     },
     "extra": {
       "OPENAI_API_KEY": "",
-      "OPENAI_MODEL": "gpt-3.5-turbo"
+      "OPENAI_MODEL": "gpt-3.5-turbo",
+      "GEMINI_API_KEY": "",
+      "GEMINI_MODEL": "gemini-1.5-flash",
+      "eas": {
+        "projectId": "0e8e4b8e-8bab-464b-ba65-c7afe6ad43c2"
+      }
     }
   }
 }
