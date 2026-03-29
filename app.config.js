@@ -2,6 +2,7 @@ export default ({ config }) => ({
   ...config,
   extra: {
     ...config.extra,
+    NODE_ENV: process.env.NODE_ENV || "development",
     API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
     OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "",
     OPENAI_MODEL: process.env.EXPO_PUBLIC_OPENAI_MODEL || "gpt-3.5-turbo",
