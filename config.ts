@@ -8,8 +8,8 @@ const getExtra = (key: string, fallback: string = ""): string => {
     return Constants.expoConfig?.extra?.[key] || fallback;
 };
 
-// Fallback to local IP for development if no environment variable is provided
-export const API_BASE_URL = getExtra('API_BASE_URL', "http://10.18.247.199:3000");
+// Fallback to production URL if no environment variable is provided
+export const API_BASE_URL = getExtra('API_BASE_URL', "https://wildlife-safety-api.onrender.com");
 
 export const getApiBaseUrl = (): string => {
     const url = API_BASE_URL;

@@ -58,10 +58,16 @@ const HEATMAP_PATH = path.join(__dirname, 'python', 'cache', 'corridor_heatmap.j
 const ML_SEQ_SCRIPT = path.join(ML_DIR, 'predict_lstm_seq.py');
 const ML_MOVE_V2_SCRIPT = ML_SEQ_SCRIPT;
 
-// Force ML to use Python 3.10 virtual environment if available
-const PYTHON_PATH = path.join(__dirname, "..", "lstm_env", process.platform === 'win32' ? path.join("Scripts", "python.exe") : path.join("bin", "python3"));
-const ML_PYTHON_EXE = PYTHON_PATH;
-console.log("ML Python interpreter:", ML_PYTHON_EXE);
+// Detect environment to use correct Python interpreter
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+
+// Force ML to use Python 3.10 virtual environment if available (Local Dev)
+// On Render, we use the global 'python3' command.
+const LOCAL_PYTHON = path.join(__dirname, "..", "lstm_env", process.platform === 'win32' ? path.join("Scripts", "python.exe") : path.join("bin", "python3"));
+const ML_PYTHON_EXE = isProduction ? "python3" : (fs.existsSync(LOCAL_PYTHON) ? LOCAL_PYTHON : "python3");
+
+console.log(`[ML] Environment: ${isProduction ? 'Production' : 'Development'}`);
+console.log("[ML] Python interpreter:", ML_PYTHON_EXE);
 
 // Log detected Python version at startup for verification
 try {
