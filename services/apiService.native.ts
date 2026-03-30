@@ -31,7 +31,15 @@ const distKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }
 // Native-safe fetch implementation (no CORS proxy needed)
 const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, backoff = 2000): Promise<any> => {
     try {
-        const response = await fetch(url, options);
+        const mergedOptions = {
+            ...options,
+            headers: {
+                'Accept': 'application/json',
+                ...options.headers,
+            },
+        };
+
+        const response = await fetch(url, mergedOptions);
         if (!response.ok) {
             logger.warn(`API request to ${url} returned status ${response.status}`);
             return { 
@@ -41,9 +49,17 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
                 message: `HTTP Error ${response.status}`
             };
         }
-        const data = await response.json();
-        logger.debug(`[API] Success from ${url.split('?')[0]}`);
-        return data;
+        
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            const data = await response.json();
+            logger.debug(`[API] Success from ${url.split('?')[0]}`);
+            return data;
+        } else {
+            const text = await response.text();
+            logger.debug(`[API] Success (text) from ${url.split('?')[0]}`);
+            return { status: 'ok', data: text };
+        }
     } catch (error: any) {
         const isAbort = error.name === 'AbortError' || error.message?.includes('Aborted');
         
@@ -291,11 +307,11 @@ export const checkBackendHealth = async (): Promise<boolean> => {
     const url = `${baseUrl}/api/health`;
     try {
         const controller = new AbortController();
-        // Increase timeout to 15s for slower network environments
+        // Increase timeout to 45s for slower network environments and Render spin-up
         const timeoutId = setTimeout(() => {
-            logger.warn(`[API] Health check timed out after 15s for ${url}`);
+            logger.warn(`[API] Health check timed out after 45s for ${url}`);
             controller.abort();
-        }, 15000);
+        }, 45000);
         
         const response = await nativeFetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);

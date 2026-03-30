@@ -9,7 +9,7 @@ const getExtra = (key: string, fallback: string = ""): string => {
 };
 
 // Fallback to production URL if no environment variable is provided
-export const API_BASE_URL = "https://wildlife-safety-api.onrender.com";
+export const API_BASE_URL = getExtra('API_BASE_URL', "https://wildlife-safety-api.onrender.com");
 
 export const getApiBaseUrl = (): string => {
     const url = API_BASE_URL;

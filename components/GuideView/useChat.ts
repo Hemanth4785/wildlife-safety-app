@@ -12,7 +12,7 @@ import {
   predictRouteRisk
 } from '../../services/apiService';
 import { ANIMALS } from '../../constants';
-import Constants from 'expo-constants';
+import { API_BASE_URL } from '../../config';
 
 export const useChat = (
   onOpenRouteLink?: (start: string, dest: string) => void,
@@ -49,7 +49,7 @@ export const useChat = (
     const direct = rec?.image_url;
     if (!direct) return '';
 
-    const base = (Constants.expoConfig?.extra as any)?.API_BASE_URL;
+    const base = API_BASE_URL;
 
     if (!base) return direct;
 

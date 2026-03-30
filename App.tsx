@@ -108,7 +108,17 @@ const AppContent: React.FC = () => {
     }
 
     if (backendReady === false) {
-        return <LoadingScreen message={backendError || "Backend is not reachable. Please start the backend server and try again."} />;
+        return (
+            <LoadingScreen 
+                message={backendError || "Backend is not reachable. Please start the backend server and try again."} 
+                showRetryButton={true}
+                onRetry={() => {
+                    setIsLoading(true);
+                    // This will trigger the checkBackend useEffect in useAnimalData
+                    // because we're toggling isLoading which might affect shouldFetch
+                }}
+            />
+        );
     }
     
     if (showOnboarding) return <OnboardingGuide onClose={closeOnboarding} />;
