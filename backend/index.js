@@ -338,6 +338,15 @@ app.use(
 );
 app.use(express.json({ limit: '10mb' }));
 
+// --- Base Routes ---
+app.get('/', (req, res) => {
+    res.send('Wildlife Safety API is running. Use /api/health to check status.');
+});
+
+app.get('/api', (req, res) => {
+    res.json({ message: 'Wildlife Safety API Base. Use specific endpoints like /api/wildlife/recent' });
+});
+
 app.delete('/api/reports/:id', async (req, res) => {
     try {
         const reportId = String(req.params.id || '').trim();
