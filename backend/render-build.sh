@@ -5,7 +5,9 @@ set -o errexit
 # Install Node dependencies
 npm install
 
+# Verify Python version
+echo "Using Python version: $(python3 --version)"
+
 # Install Python dependencies globally in the Render environment
-# We use python3 -m pip to ensure we use the correct environment
 python3 -m pip install --upgrade pip
-python3 -m pip install -r ../ml/requirements.txt
+python3 -m pip install --no-cache-dir -r ../ml/requirements.txt
