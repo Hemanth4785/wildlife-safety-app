@@ -75,6 +75,7 @@ yarn-error.log
 # Environment variables
 .env
 .env.local
+app.env
 .expo/
 
 # Python virtual environments
