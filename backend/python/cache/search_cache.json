@@ -95,5 +95,17 @@
       "lon": "79.6700892",
       "display_name": "Arakkonam, Arakonam, Ranipet, Tamil Nadu, 631001, India"
     }
+  ],
+  "valparai": [
+    {
+      "lat": "10.3279931",
+      "lon": "76.9557258",
+      "display_name": "Valparai, Coimbatore, Tamil Nadu, 642127, India"
+    },
+    {
+      "lat": "10.3903712",
+      "lon": "76.9514877",
+      "display_name": "Valparai, Coimbatore, Tamil Nadu, India"
+    }
   ]
 }

@@ -43369,5 +43369,47 @@
     "id": 340032105,
     "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/618695644/medium.jpg",
     "src": "inat_hist"
+  },
+  {
+    "species": "Tiger",
+    "scientific_name": "Panthera tigris",
+    "lat": 50.0265267006,
+    "lon": 14.5997198174,
+    "eventDate": "2026-03-30",
+    "quality_grade": "casual",
+    "confidence": "low",
+    "scope": "inat_api",
+    "animal": "Tiger",
+    "id": 346119269,
+    "image_url": "https://static.inaturalist.org/photos/630873766/medium.jpg",
+    "src": "inat_hist"
+  },
+  {
+    "species": "Bison",
+    "scientific_name": "Bison bison",
+    "lat": 50.7974846513,
+    "lon": 0.0118557107,
+    "eventDate": "2026-03-30",
+    "quality_grade": "needs_id",
+    "confidence": "medium",
+    "scope": "inat_api",
+    "animal": "Bison",
+    "id": 346147390,
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/630928587/medium.jpg",
+    "src": "inat_hist"
+  },
+  {
+    "species": "Bison",
+    "scientific_name": "Bison bison",
+    "lat": 44.6345547997,
+    "lon": 8.3932602,
+    "eventDate": "2026-03-30",
+    "quality_grade": "needs_id",
+    "confidence": "medium",
+    "scope": "inat_api",
+    "animal": "Bison",
+    "id": 346111028,
+    "image_url": "https://inaturalist-open-data.s3.amazonaws.com/photos/630857323/medium.jpg",
+    "src": "inat_hist"
   }
 ]
