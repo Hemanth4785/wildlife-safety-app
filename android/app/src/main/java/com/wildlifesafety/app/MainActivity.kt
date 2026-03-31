@@ -1,4 +1,4 @@
-package com.wildlifesafety
+package com.wildlifesafety.app
 
 import android.os.Build
 import android.os.Bundle

@@ -55,8 +55,7 @@
       ]
     ],
     "updates": {
-      "checkOnLaunch": "never",
-      "fallbackToCacheTimeout": 0
+      "enabled": true
     },
     "extra": {
       "OPENAI_API_KEY": "",
