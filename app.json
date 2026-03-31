@@ -16,14 +16,22 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.wildlifesafety.app"
+      "bundleIdentifier": "com.wildlifesafety.app",
+      "config": {
+        "googleMapsApiKey": "AIzaSyC2tCHysefukedY6UN8-lnhE76ekkE22Yg"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#059669"
       },
-      "package": "com.wildlifesafety.app"
+      "package": "com.wildlifesafety.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyC2tCHysefukedY6UN8-lnhE76ekkE22Yg"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
