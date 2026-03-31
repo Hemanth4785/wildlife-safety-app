@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View as RNView, StyleSheet } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useAnimalData } from './hooks/useAnimalData';
 import { View } from './types';
@@ -226,13 +227,14 @@ const styles = StyleSheet.create({
 
 const App: React.FC = () => {
     return (
-        <ErrorBoundary>
+        <SafeAreaProvider>
+            <StatusBar style="dark" backgroundColor="transparent" translucent={true} />
             <AppProvider>
-                <SafeAreaProvider>
+                <ErrorBoundary>
                     <AppContent />
-                </SafeAreaProvider>
+                </ErrorBoundary>
             </AppProvider>
-        </ErrorBoundary>
+        </SafeAreaProvider>
     );
 };
 
