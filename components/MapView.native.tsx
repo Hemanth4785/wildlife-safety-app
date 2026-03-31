@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable, unstable_batchedUpdates, Animated } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, type Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, UrlTile, type Region } from 'react-native-maps';
 import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState, UIMode } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS, canonicalScientific } from '../constants';
@@ -828,16 +828,25 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             <View style={styles.screen}>
                 <MapView
                     ref={mapRef}
-                    provider={PROVIDER_GOOGLE}
+                    provider={undefined} // Use default provider to support OSM tiles
                     style={StyleSheet.absoluteFillObject}
                     initialRegion={initialRegion}
                     showsUserLocation={true}
                     followsUserLocation={isNavigating}
                     showsMyLocationButton={false}
+                    mapType={Platform.OS === 'android' ? 'none' : 'standard'} // Use none on Android to favor OSM tiles
                     onRegionChangeComplete={(region: Region) =>
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
                     }
                 >
+                    {/* OpenStreetMap Tile Layer */}
+                    <UrlTile
+                        urlTemplate="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                        zIndex={-1}
+                    />
+                    
                     {/* 1. RISK CIRCLES (Bottom Layer) */}
                     {showAnimalMarkers && riskZones.map((zone, index) => (
                         <Circle
