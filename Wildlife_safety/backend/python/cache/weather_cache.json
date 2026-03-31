@@ -1,0 +1,26 @@
+{
+  "13.10,79.66": {
+    "timestamp": 1774781160741,
+    "data": {
+      "current_weather": {
+        "temperature": 38.51,
+        "weathercode": 0,
+        "windspeed": 26,
+        "is_day": 1
+      },
+      "status": "success"
+    }
+  },
+  "12.84,80.15": {
+    "timestamp": 1774344719161,
+    "data": {
+      "current_weather": {
+        "temperature": 31.76,
+        "weathercode": 2,
+        "windspeed": 19,
+        "is_day": 1
+      },
+      "status": "success"
+    }
+  }
+}

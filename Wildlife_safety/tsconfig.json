@@ -1,0 +1,55 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    /* Strictness */
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Critical fix: override Expo's invalid setting */
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "moduleSuffixes": [".native", ".web", ""],
+
+    /* Interop */
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "isolatedModules": true,
+
+    /* JSX */
+    "jsx": "react-jsx",
+
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+
+    /* Sanity */
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* No emit (Expo handles builds) */
+    "noEmit": true,
+
+    /* Types: Explicitly list to avoid auto-including missing/unused types like jest */
+    "types": ["node", "react"]
+  },
+
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.d.ts"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js",
+    "vite.config.ts",
+    "myApp",
+    "backend"
+  ]
+}
