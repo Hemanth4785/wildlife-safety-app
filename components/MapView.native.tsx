@@ -560,6 +560,30 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }));
     }, [predictedPath]);
 
+    // ISSUE 1: Map clearing after navigation ends
+    useEffect(() => {
+        if (!isNavigating) {
+            // When navigation ends, clear all prediction-related state
+            if (typeof props.onStopNavigation === 'function') {
+                // Ensure the parent state is also updated if needed
+            }
+            
+            // Clear local prediction states
+            setPredictedPath([]);
+            setPredictionRisk(null);
+            setPredictedAnimalName('');
+            setSelectedPointIndex(null);
+            setPredictionModel(null);
+            setRouteLocations(null);
+            setDestinationWeather(null);
+            setRouteRiskLevel(null);
+            setRouteRiskProb(null);
+            
+            // Note: visibleAnimals, showPredictions, etc. are filters and should 
+            // likely be kept as user set them, but we clear the actual data.
+        }
+    }, [isNavigating]);
+
     const handleToggleAnimal = useCallback((animal: string) => {
         setVisibleAnimals(prev => ({
             ...prev,

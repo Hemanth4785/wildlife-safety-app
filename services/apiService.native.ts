@@ -37,6 +37,8 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
                 'Accept': 'application/json',
                 ...options.headers,
             },
+            // ISSUE 2: Default timeout to 60 seconds
+            signal: options.signal || (AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined)
         };
 
         const response = await fetch(url, mergedOptions);

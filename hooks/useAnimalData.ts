@@ -106,6 +106,10 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
         setMessage('Analyzing wildlife activity...');
 
         try {
+            // ISSUE 2: Backend Wake-Up Call
+            logger.info("[API] Waking up backend...");
+            await api.checkBackendHealth(1, 0); // Quick check to wake up Render
+
             const animalSightingsPromises = Object.entries(ANIMALS).map(([scientificName, info]) =>
                 api.getAnimalSightings(scientificName, location, RADIUS_KM).then((sightings: Sighting[]) => ({
                     scientificName,
@@ -462,10 +466,18 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
         setLiveLocation(null);
         setNavigationStats(null);
         setNavigationAlert(null);
-        setSafeRoute(null);
-        // Do NOT clear safe places here so they remain visible on the map
+        setClosestPathIndex(0);
         setIsApproachingStart(false);
         isApproachingStartRef.current = false;
+        
+        // ISSUE 1: Clear all prediction-related state when navigation stops
+        setPredictions([]);
+        setSafeRoute(null);
+        setSafePlaces([]);
+        setRiskZones([]);
+        setRiskySegments([]);
+        setRouteStatus(AppState.IDLE);
+        setRouteMessage('');
     }, []);
 
     const safeRouteRef = useRef(safeRoute);
