@@ -140,6 +140,8 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 if (!sightingSet || sightingSet.sightings.length === 0 || pathPoints.length === 0) return null;
 
                 const animalInfo = ANIMALS[scientificName];
+                if (!animalInfo) return null;
+
                 const currentSighting = sightingSet.sightings[0];
                 const currentPoint = { lat: currentSighting.lat, lon: currentSighting.lon };
                 const distance = geo.calculateDistance(location, currentPoint);
@@ -152,17 +154,23 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
 
                 const fullPath = geo.createSplinePath(waypoints, SMOOTH_STEPS);
                 
-                return {
+                const prediction: AnimalPrediction = {
                     id: `${scientificName}-${Date.now()}`,
                     scientific: scientificName,
-                    common: animalInfo.common,
-                    emoji: animalInfo.emoji,
-                    color: animalInfo.color,
+                    common: animalInfo.common || scientificName,
+                    emoji: animalInfo.emoji || '🐾',
+                    color: animalInfo.color || '#6b7280',
                     image: currentSighting.image_url,
-                    current: { ...currentPoint, addr: currentAddr, dist_km: parseFloat(distance.toFixed(1)) },
-                    preds: pathPoints, // No reverse geocoding for all points
+                    current: { 
+                        lat: currentPoint.lat, 
+                        lon: currentPoint.lon, 
+                        addr: currentAddr || 'Unknown area', 
+                        dist_km: parseFloat(distance.toFixed(1)) 
+                    },
+                    preds: pathPoints.map(p => ({ lat: p.lat, lon: p.lon, addr: '' })),
                     fullPath
                 };
+                return prediction;
             });
 
             const newPredictions = (await Promise.all(detailedPredictionsPromises)).filter(Boolean) as AnimalPrediction[];
@@ -384,9 +392,16 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 const data = isHistoricalActive
                     ? await api.fetchRecentWildlife(historicalDateRange.startDate, historicalDateRange.endDate)
                     : await api.fetchRecentWildlife();
-                setRecentSightings(data);
+                
+                if (Array.isArray(data)) {
+                    setRecentSightings(data);
+                } else {
+                    logger.warn('fetchRecentWildlife returned non-array data', data);
+                    setRecentSightings([]);
+                }
             } catch (err) {
                 logger.error('Failed to fetch wildlife sightings', err);
+                setRecentSightings([]);
             } finally {
                 setIsWildlifeLoading(false);
             }

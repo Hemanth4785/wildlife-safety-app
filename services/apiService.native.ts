@@ -50,35 +50,46 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
             };
         }
         
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            const data = await response.json();
-            logger.debug(`[API] Success from ${url.split('?')[0]}`);
-            return data;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            try {
+                const data = await response.json();
+                logger.debug(`[API] Success from ${url.split('?')[0]}`);
+                return data;
+            } catch (e) {
+                logger.error(`[API] JSON parse error from ${url}`, e);
+                return { status: 'degraded', error: true, message: 'Invalid JSON response' };
+            }
         } else {
-            const text = await response.text();
-            logger.debug(`[API] Success (text) from ${url.split('?')[0]}`);
-            return { status: 'ok', data: text };
+            try {
+                const text = await response.text();
+                logger.debug(`[API] Success (text) from ${url.split('?')[0]}`);
+                return { status: 'ok', data: text };
+            } catch (e) {
+                logger.error(`[API] Text read error from ${url}`, e);
+                return { status: 'degraded', error: true, message: 'Could not read response body' };
+            }
         }
     } catch (error: any) {
-        const isAbort = error.name === 'AbortError' || error.message?.includes('Aborted');
+        const errorMsg = error?.message || String(error || 'Unknown error');
+        const isAbort = error?.name === 'AbortError' || errorMsg.includes('Aborted');
         
-        if (retries > 0 && !isAbort && (error.message.includes('Network request failed') || error.message.includes('network'))) {
-             logger.warn(`Fetch failed (network). Retrying in ${backoff}ms... (${retries} attempts left)`, error);
+        if (retries > 0 && !isAbort && (errorMsg.includes('Network request failed') || errorMsg.toLowerCase().includes('network'))) {
+             logger.warn(`Fetch failed (network). Retrying in ${backoff}ms... (${retries} attempts left)`, errorMsg);
              await new Promise(resolve => setTimeout(resolve, backoff));
              return nativeFetch(url, options, retries - 1, backoff * 2);
         }
         
         if (isAbort) {
-            logger.error(`Critical fetch failure for ${url} - Request timed out (Aborted)`, { error: error.message });
+            logger.error(`Critical fetch failure for ${url} - Request timed out (Aborted)`, { error: errorMsg });
         } else {
-            logger.error(`Critical fetch failure for ${url}`, error);
+            logger.error(`Critical fetch failure for ${url}`, errorMsg);
         }
         
         return { 
             status: 'degraded', 
             error: true, 
-            message: isAbort ? "Request timed out" : (error.message || "Network error")
+            message: isAbort ? "Request timed out" : errorMsg
         };
     }
 };

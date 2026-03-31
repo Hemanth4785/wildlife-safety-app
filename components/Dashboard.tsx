@@ -157,12 +157,13 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
     const { user, status, message, predictions, nearbyRadiusKm, safeRoute, weather, onNavigate, recentSightings = [], visibleAnimals = {} } = props;
 
     const filteredPredictions = useMemo(() => {
-        return predictions.filter(p => visibleAnimals[p.scientific] !== false);
+        if (!Array.isArray(predictions)) return [];
+        return predictions.filter(p => p && p.scientific && visibleAnimals[p.scientific] !== false);
     }, [predictions, visibleAnimals]);
 
     const dashboardStats = useMemo(() => {
-        const nearbyAlerts = filteredPredictions.filter((p: AnimalPrediction) => p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM));
-        const speciesTracked = new Set(filteredPredictions.map((p: AnimalPrediction) => p.common)).size;
+        const nearbyAlerts = filteredPredictions.filter((p: AnimalPrediction) => p && p.current && p.current.dist_km <= (user?.nearbyRadiusKm ?? NEARBY_KM));
+        const speciesTracked = new Set(filteredPredictions.map((p: AnimalPrediction) => p?.common).filter(Boolean)).size;
         const totalSightings = filteredPredictions.length; 
         
         let riskScore = nearbyAlerts.length * 15 + totalSightings * 2;
@@ -183,21 +184,22 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
 
     const filteredSightings = useMemo(() => {
         // Only show sightings that the user has viewed/loaded on the Map (provided via props)
-        return recentSightings.filter(s => visibleAnimals[s.scientificName] !== false);
+        if (!Array.isArray(recentSightings)) return [];
+        return recentSightings.filter(s => s && s.scientificName && visibleAnimals[s.scientificName] !== false);
     }, [recentSightings, visibleAnimals]);
 
     const displaySightings = useMemo(() => {
         // Map predictions into sighting format if needed, but ensure they are within the filtered set
         const predAsSightings = filteredPredictions.map((p) => ({
             id: `pred-${p.id}`,
-            name: p.common,
+            name: p.common || 'Unknown Animal',
             scientificName: p.scientific,
-            emoji: p.emoji,
+            emoji: p.emoji || '🐾',
             image_url: p.image,
-            lat: p.current.lat,
-            lon: p.current.lon,
+            lat: p.current?.lat || 0,
+            lon: p.current?.lon || 0,
             date: new Date().toISOString(),
-            address: p.current.addr,
+            address: p.current?.addr || 'Unknown Location',
             risk: p.metadata?.confidence === 'high' ? 'High' : 'Medium'
         }));
         
@@ -207,6 +209,7 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
         const unique = [];
         
         for (const s of merged) {
+            if (!s) continue;
             // Deduplicate by name and address to show only unique visible data
             const key = `${(s.name || '').toLowerCase()}|${(s.address || '').toLowerCase()}`;
             if (seen.has(key)) continue;
@@ -215,17 +218,19 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
         }
         
         // Sort by date descending so the most recent viewed data is first
-        return unique.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return unique.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
     }, [filteredSightings, filteredPredictions]);
 
     const highRiskAlerts = useMemo(() => {
         // Alerts must derive strictly from the currently viewed high-risk data
         return filteredPredictions.filter(p => 
-            p.metadata?.confidence === 'high' || 
-            p.current.dist_km <= (user.nearbyRadiusKm ?? NEARBY_KM) ||
-            ['tiger', 'elephant', 'leopard', 'bear'].some(danger => p.scientific.toLowerCase().includes(danger))
+            p && (
+                p.metadata?.confidence === 'high' || 
+                (p.current && p.current.dist_km <= (user?.nearbyRadiusKm ?? NEARBY_KM)) ||
+                (p.scientific && ['tiger', 'elephant', 'leopard', 'bear'].some(danger => p.scientific.toLowerCase().includes(danger)))
+            )
         ).slice(0, 5);
-    }, [filteredPredictions, user.nearbyRadiusKm]);
+    }, [filteredPredictions, user?.nearbyRadiusKm]);
 
     const greeting = getGreeting();
 
@@ -235,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = (props: DashboardProps) => {
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.header}>
-                <Text style={styles.greeting}>{greeting}, {user.name.split(' ')[0]}</Text>
+                <Text style={styles.greeting}>{greeting}, {(user?.name || 'User').split(' ')[0]}</Text>
                 <Text style={styles.title}>
                     {status === AppState.LOADING ? 'Loading Wildlife Data...' : 'Stay Safe Out There'}
                 </Text>

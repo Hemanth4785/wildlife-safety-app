@@ -24,7 +24,8 @@ import { API_BASE_URL } from './config';
 console.log("Firebase connected:", auth.app.name);
 console.log("Firestore initialized:", db.type === 'firestore' ? 'Yes' : 'No');
 console.log("[DEBUG] API_BASE_URL:", API_BASE_URL);
-console.log("[DEBUG] Expo Constants Extra:", JSON.stringify(Constants.expoConfig?.extra, null, 2));
+console.log("[DEBUG] NODE_ENV:", Constants.expoConfig?.extra?.NODE_ENV);
+console.log("[DEBUG] EAS Project ID:", Constants.expoConfig?.extra?.eas?.projectId);
 
 const AppContent: React.FC = () => {
     const { 
