@@ -18,9 +18,13 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
 import { auth, db } from "./services/firebase";
 import { storage } from "./utils/storage";
+import Constants from 'expo-constants';
+import { API_BASE_URL } from './config';
 
 console.log("Firebase connected:", auth.app.name);
 console.log("Firestore initialized:", db.type === 'firestore' ? 'Yes' : 'No');
+console.log("[DEBUG] API_BASE_URL:", API_BASE_URL);
+console.log("[DEBUG] Expo Constants Extra:", JSON.stringify(Constants.expoConfig?.extra, null, 2));
 
 const AppContent: React.FC = () => {
     const { 

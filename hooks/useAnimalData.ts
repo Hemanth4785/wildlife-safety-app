@@ -360,6 +360,7 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
 
         const checkBackend = async () => {
             try {
+                logger.info('[Health] Checking backend status...');
                 const ok = await api.checkBackendHealth();
                 if (!ok) {
                     setBackendReady(false);

@@ -300,30 +300,45 @@ export const getRainViewerTimestamps = async (): Promise<any> => {
     }
 };
 
-export const checkBackendHealth = async (): Promise<boolean> => {
+export const checkBackendHealth = async (retries = 3, delay = 5000): Promise<boolean> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return false;
 
     const url = `${baseUrl}/api/health`;
-    try {
-        const controller = new AbortController();
-        // Increase timeout to 45s for slower network environments and Render spin-up
-        const timeoutId = setTimeout(() => {
-            logger.warn(`[API] Health check timed out after 45s for ${url}`);
-            controller.abort();
-        }, 45000);
-        
-        const response = await nativeFetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        return !!response && response.status === 'ok';
-    } catch (error: any) {
-        if (error.name === 'AbortError') {
-            logger.error('Backend health check timed out (Aborted)', { url });
-        } else {
-            logger.error('Backend health check failed', error);
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            const controller = new AbortController();
+            // Increase timeout to 45s for slower network environments and Render spin-up
+            const timeoutId = setTimeout(() => {
+                logger.warn(`[API] Health check timed out after 45s for ${url} (Attempt ${i + 1}/${retries})`);
+                controller.abort();
+            }, 45000);
+            
+            const response = await nativeFetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            if (!!response && response.status === 'ok') {
+                return true;
+            }
+            
+            logger.warn(`[API] Health check attempt ${i + 1}/${retries} failed or returned unexpected status`, response);
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                logger.error(`[API] Health check timed out (Aborted) - Attempt ${i + 1}/${retries}`, { url });
+            } else {
+                logger.error(`[API] Health check failed - Attempt ${i + 1}/${retries}`, error);
+            }
         }
-        return false;
+        
+        if (i < retries - 1) {
+            const waitTime = delay * Math.pow(2, i); // Exponential backoff: 5s, 10s, 20s
+            logger.info(`[API] Retrying health check in ${waitTime}ms...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
     }
+    
+    return false;
 };
 
 export const searchLocations = async (query: string): Promise<Location[]> => {

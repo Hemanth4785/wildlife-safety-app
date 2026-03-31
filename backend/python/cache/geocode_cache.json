@@ -2971,5 +2971,36 @@
       "80.0581585",
       "80.0781585"
     ]
+  },
+  "13.0978,79.6591": {
+    "place_id": 233664170,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "osm_type": "way",
+    "osm_id": 1264005122,
+    "lat": "13.0977847",
+    "lon": "79.6589445",
+    "class": "highway",
+    "type": "residential",
+    "place_rank": 26,
+    "importance": 0.05338731746395053,
+    "addresstype": "road",
+    "name": "",
+    "display_name": "Arakkonam, Arakonam, Ranipet, Tamil Nadu, 631003, India",
+    "address": {
+      "town": "Arakkonam",
+      "county": "Arakonam",
+      "state_district": "Ranipet",
+      "state": "Tamil Nadu",
+      "ISO3166-2-lvl4": "IN-TN",
+      "postcode": "631003",
+      "country": "India",
+      "country_code": "in"
+    },
+    "boundingbox": [
+      "13.0969480",
+      "13.0980479",
+      "79.6588504",
+      "79.6591079"
+    ]
   }
 }
