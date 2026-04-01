@@ -12,11 +12,12 @@ from tensorflow.keras.models import load_model
 
 # Try to handle imports for both direct execution and module execution
 try:
-    from .utils import haversine, calculate_time_weight
-    from .water_distance import get_distance_to_water_async
-except ImportError:
     from utils import haversine, calculate_time_weight
     from water_distance import get_distance_to_water_async
+except ImportError:
+    # This fallback is for local testing, not for production
+    from .utils import haversine, calculate_time_weight
+    from .water_distance import get_distance_to_water_async
 
 # Configure logging
 logging.basicConfig(

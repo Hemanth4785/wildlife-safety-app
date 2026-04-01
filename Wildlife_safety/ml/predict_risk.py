@@ -5,8 +5,8 @@ import warnings
 import joblib
 import numpy as np
 import pandas as pd
-from .utils import haversine, calculate_time_weight
-from .water_distance import get_distance_to_water
+from utils import haversine, calculate_time_weight
+from water_distance import get_distance_to_water
 
 # Suppress TensorFlow and other logs
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
