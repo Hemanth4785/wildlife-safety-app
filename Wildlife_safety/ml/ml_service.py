@@ -34,7 +34,7 @@ ENCODERS_PATH = os.path.join(BASE_DIR, "encoders.pkl")
 FEATURE_ORDER_PATH = os.path.join(BASE_DIR, "feature_order.json")
 
 # LSTM and MaxEnt assets
-LSTM_GENERIC_PATH = os.path.join(BASE_DIR, "models", "lstm_seq.keras")
+LSTM_GENERIC_PATH = os.path.join(BASE_DIR, "lstm_model.h5")
 MAXENT_MODELS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_models.pkl")
 MAXENT_SCALERS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_scalers.pkl")
 
@@ -62,10 +62,16 @@ async def lifespan(app: FastAPI):
 
         # Load LSTM Generic
         if os.path.exists(LSTM_GENERIC_PATH):
-            import contextlib
-            with contextlib.redirect_stdout(None):
-                assets['lstm_generic'] = load_model(LSTM_GENERIC_PATH, compile=False)
-            logger.info(f"Generic LSTM model loaded from {LSTM_GENERIC_PATH}")
+            try:
+                import contextlib
+                with contextlib.redirect_stdout(None):
+                    assets['lstm_generic'] = load_model(LSTM_GENERIC_PATH, compile=False)
+                logger.info(f"Generic LSTM model loaded from {LSTM_GENERIC_PATH}")
+                # Optional: log model summary to verify it loaded correctly
+                # assets['lstm_generic'].summary() 
+            except Exception as e:
+                logger.error(f"LSTM load failed: {str(e)}")
+                assets['lstm_generic'] = None
 
         # Load MaxEnt
         if os.path.exists(MAXENT_MODELS_PATH) and os.path.exists(MAXENT_SCALERS_PATH):

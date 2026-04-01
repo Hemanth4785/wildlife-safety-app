@@ -15,7 +15,7 @@ import joblib
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-MODEL_PATH = os.path.join(MODELS_DIR, "lstm_seq.keras")
+MODEL_PATH = os.path.join(BASE_DIR, "lstm_model.h5")
 SCALER_PATH = os.path.join(MODELS_DIR, "gps_scaler_seq.pkl")
 WINDOW = 15
 
