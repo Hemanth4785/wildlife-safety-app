@@ -846,9 +846,11 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     showsUserLocation={true}
                     followsUserLocation={isNavigating}
                     showsMyLocationButton={true}
-                    onMapReady={() => console.log('[MapView] Map is ready and loaded.')}
+                    onMapReady={() => {
+                        console.log('[MapView] Google Maps Engine successfully loaded.');
+                    }}
                     onRegionChangeComplete={(region: Region) => {
-                        console.log(`[MapView] Region changed: ${region.latitude}, ${region.longitude}`);
+                        console.log(`[MapView] Viewport updated: lat=${region.latitude}, lon=${region.longitude}, zoomLevel=${Math.log2(360 / region.longitudeDelta)}`);
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta });
                     }}
                 >
