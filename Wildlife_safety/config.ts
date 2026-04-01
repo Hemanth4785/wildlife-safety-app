@@ -22,4 +22,5 @@ export const CONFIG = {
     OPENAI_MODEL: getExtra('OPENAI_MODEL', 'gpt-3.5-turbo'),
     GEMINI_API_KEY: getExtra('GEMINI_API_KEY'),
     GEMINI_MODEL: getExtra('GEMINI_MODEL', 'gemini-1.5-flash'),
+    WEATHER_API_KEY: getExtra('WEATHER_API_KEY', '0f965eb13fcac3cab46a6d13af345eac'),
 };

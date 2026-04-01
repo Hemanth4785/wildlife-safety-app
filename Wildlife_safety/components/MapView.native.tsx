@@ -7,8 +7,8 @@ import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAler
 import { AppState, UIMode } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS, canonicalScientific } from '../constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon } from './icons';
-import AnimalDetailModal from './AnimalDetailModal';
+import { API_BASE_URL, CONFIG } from '../config';
+import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon, ChartIcon } from './icons';
 import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
 import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistanceToPolyline } from '../services/geoService';
@@ -343,8 +343,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     } = props;
     
     const mapRef = useRef<MapView>(null);
-    // Removed duplicate uiMode declaration here
-    // Removed unused animalClusters state to simplify and stabilize
+    const initialMapKey = useRef(Math.random().toString(36).substring(7));
     const [selectedAnimal, setSelectedAnimal] = useState<{
         name: string;
         scientificName?: string;
@@ -368,13 +367,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Navigation & Loading State
     const [isNavLoading, setIsNavLoading] = useState(false);
     useEffect(() => {
+        let timer: any;
         if (isRouteLoading) {
             setIsNavLoading(true);
         } else {
             // Add a small delay for smoother transition after loading
-            const timer = setTimeout(() => setIsNavLoading(false), 500);
-            return () => clearTimeout(timer);
+            timer = setTimeout(() => setIsNavLoading(false), 500);
         }
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
     }, [isRouteLoading]);
     
     const bottomSheetTranslateY = useRef(new Animated.Value(300)).current;
@@ -426,19 +428,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Optimize reverse geocoding for routes: only fetch names for start, mid, end
     const [routeLocations, setRouteLocations] = useState<string[] | null>(null);
     useEffect(() => {
+        let isMounted = true;
         const fetchRouteLocations = async () => {
             try {
                 if (!safeRoute?.path || safeRoute.path.length < 1) {
-                    setRouteLocations(null);
+                    if (isMounted) setRouteLocations(null);
                     return;
                 }
                 const routeCoords = safeRoute.path.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }));
                 if (routeCoords.length === 1) {
                     const only = routeCoords[0];
                     const name = await api.reverseGeocode(only.latitude, only.longitude);
-                    console.log("Route location names:", [name]);
-                    setRouteLocations([name]);
-                    console.log("Reverse geocode requests reduced to:", 1);
+                    if (isMounted) {
+                        console.log("Route location names:", [name]);
+                        setRouteLocations([name]);
+                    }
                     return;
                 }
                 const keyPoints = [
@@ -449,14 +453,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 const results = await Promise.all(
                     keyPoints.map(p => api.reverseGeocode(p.latitude, p.longitude))
                 );
-                console.log("Route location names:", results);
-                setRouteLocations(results);
-                console.log("Reverse geocode requests reduced to:", keyPoints.length);
+                if (isMounted) {
+                    console.log("Route location names:", results);
+                    setRouteLocations(results);
+                }
             } catch (err) {
                 console.error("Reverse geocode failed:", err);
             }
         };
         fetchRouteLocations();
+        return () => { isMounted = false; };
     }, [safeRoute?.path?.length]);
     
     useEffect(() => {
@@ -498,7 +504,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         const fetchDestinationWeather = async () => {
             if (safeRoute?.end?.lat && safeRoute?.end?.lon) {
                 try {
-                    const apiKey = '0f965eb13fcac3cab46a6d13af345eac';
+                    const apiKey = CONFIG.WEATHER_API_KEY;
                     const { lat, lon } = safeRoute.end;
                     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${apiKey}`;
                     const response = await fetch(url);
@@ -721,16 +727,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     // Route risk detection and route color update
     useEffect(() => {
+        let isMounted = true;
         const update = async () => {
             try {
                 if (!safeRoute?.path || safeRoute.path.length < 2) {
-                    setRouteRiskLevel(null);
-                    setRouteRiskProb(null);
-                    setRouteColor('#16a34a');
-                    setShowRiskAlert(false);
+                    if (isMounted) {
+                        setRouteRiskLevel(null);
+                        setRouteRiskProb(null);
+                        setRouteColor('#16a34a');
+                        setShowRiskAlert(false);
+                    }
                     return;
                 }
                 const res = await api.predictRouteRisk(safeRoute.path as any);
+                if (!isMounted) return;
+
                 if (res && typeof res.routeRisk === 'string') {
                     const lvl = (res.routeRisk || 'LOW').toUpperCase() as 'LOW'|'MEDIUM'|'HIGH';
                     setRouteRiskLevel(lvl);
@@ -738,11 +749,6 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     const color = lvl === 'HIGH' ? '#ef4444' : (lvl === 'MEDIUM' ? '#f59e0b' : '#16a34a');
                     setRouteColor(color);
                     setShowRiskAlert(lvl !== 'LOW');
-                    try {
-                        console.log('Route risk:', lvl, 'probability:', res.probability);
-                        console.log('Animals near route:', res.animalsDetected || []);
-                        console.log('PredictionSources:', res.predictionSources || []);
-                    } catch {}
                 } else {
                     setRouteRiskLevel(null);
                     setRouteRiskProb(null);
@@ -751,11 +757,14 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 }
             } catch (e) {
                 console.warn('route risk check failed', e);
-                setRouteColor('#16a34a');
-                setShowRiskAlert(false);
+                if (isMounted) {
+                    setRouteColor('#16a34a');
+                    setShowRiskAlert(false);
+                }
             }
         };
         update();
+        return () => { isMounted = false; };
     }, [safeRoute?.path?.length]);
 
     // Flatten data for markers to ensure stable keys and no undefined access
@@ -830,20 +839,23 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             <View style={styles.screen}>
                 <MapView
                     ref={mapRef}
+                    key={initialMapKey.current}
                     provider={PROVIDER_GOOGLE}
-                    style={StyleSheet.absoluteFillObject}
+                    style={styles.map}
                     initialRegion={initialRegion}
                     showsUserLocation={true}
                     followsUserLocation={isNavigating}
-                    showsMyLocationButton={false}
-                    onRegionChangeComplete={(region: Region) =>
-                        setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
-                    }
+                    showsMyLocationButton={true}
+                    onMapReady={() => console.log('[MapView] Map is ready and loaded.')}
+                    onRegionChangeComplete={(region: Region) => {
+                        console.log(`[MapView] Region changed: ${region.latitude}, ${region.longitude}`);
+                        setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta });
+                    }}
                 >
                     {/* 1. RISK CIRCLES (Bottom Layer) */}
-                    {showAnimalMarkers && riskZones.map((zone, index) => (
+                    {showAnimalMarkers && riskZones.map((zone) => (
                         <Circle
-                            key={`risk-circle-idx-${index}-${zone.id || 'no-id'}`}
+                            key={`risk-circle-${zone.id || `${zone.lat}-${zone.lon}`}`}
                             center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
                             radius={2000}
                             fillColor="rgba(255, 0, 0, 0.12)"
@@ -890,13 +902,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     )}
 
                     {/* 3. SAFE PLACES (Modern Badge) */}
-                    {processedSafePlaces.map((place, index) => {
+                    {processedSafePlaces.map((place) => {
                         let emoji = '🌲'; // Default Forest Office
                         if (place.type === 'police') emoji = '👮';
                         
                         return (
                             <Marker
-                                key={`safe-idx-${index}-${place.id || 'no-id'}`}
+                                key={`safe-${place.id || `${place.lat}-${place.lon}`}`}
                                 coordinate={{ latitude: Number(place.lat), longitude: Number(place.lon) }}
                                 zIndex={3}
                                 anchor={{ x: 0.5, y: 0.5 }}
@@ -911,7 +923,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     })}
 
                     {/* 4. ANIMAL & RISK MARKERS */}
-                    {animalMarkers.map((sighting, index) => {
+                    {animalMarkers.map((sighting) => {
                         const sci = sighting.scientificName || sighting.scientific_name;
                         const sciCanon = sci ? canonicalScientific(String(sci)) : '';
                         const animalInfo = ANIMALS[sciCanon];
@@ -924,7 +936,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
                         return (
                             <Marker
-                                key={`sighting-idx-${index}-${sighting.id || 'no-id'}`}
+                                key={`sighting-${sighting.id || `${sighting.lat}-${sighting.lon}`}`}
                                 coordinate={{ latitude: Number(sighting.lat), longitude: Number(sighting.lon) }}
                                 zIndex={4}
                                 onPress={() => {
@@ -933,7 +945,10 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                                         scientificName: sci,
                                         image_url: sighting.image_url,
                                         date: date,
-                                        metadata: sighting.metadata || { scope: 'regional', confidence: 'medium' },
+                                        metadata: {
+                                            scope: sighting.metadata?.scope || 'regional',
+                                            confidence: sighting.metadata?.confidence || 'medium'
+                                        },
                                         lat: Number(sighting.lat),
                                         lon: Number(sighting.lon),
                                         address: sighting.address
@@ -1022,7 +1037,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     )}
 
                     {/* 6. WILDLIFE REPORTS MARKERS */}
-                    {showAnimalMarkers && reportMarkers.map((r, index) => {
+                    {showAnimalMarkers && reportMarkers.map((r) => {
                         let emoji = '🐾';
                         const name = r.wildlifeType || r.ai?.common;
                         if (name) {
@@ -1031,7 +1046,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         }
                         return (
                                     <Marker
-                                        key={`report-idx-${index}-${r.id || 'no-id'}`}
+                                        key={`report-${r.id || `${r.lat}-${r.lon}`}`}
                                         coordinate={{ latitude: Number(r.lat), longitude: Number(r.lon) }}
                                         title={`${r.wildlifeType || 'Wildlife Report'} (User Observation)`}
                                         description={r.description}
@@ -1057,13 +1072,45 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         );
                     })}
 
+                    {/* 7. PREDICTION MARKERS (Current predicted locations) */}
+                    {showPredictions && filteredPredictions.map((p) => (
+                        <Marker
+                            key={`prediction-marker-${p.id || p.scientific}`}
+                            coordinate={{ latitude: p.current.lat, longitude: p.current.lon }}
+                            zIndex={8}
+                            onPress={() => {
+                                setSelectedAnimal({
+                                    name: p.common,
+                                    scientificName: p.scientific,
+                                    image_url: p.image,
+                                    date: new Date().toISOString(),
+                                    metadata: {
+                                        scope: p.metadata?.scope || 'prediction',
+                                        confidence: p.metadata?.confidence || 'medium'
+                                    },
+                                    lat: p.current.lat,
+                                    lon: p.current.lon,
+                                    address: p.current.addr
+                                });
+                                setUiMode(UIMode.DETAIL);
+                            }}
+                        >
+                            <View style={[styles.markerContainer, styles.predictionMarker]}>
+                                <Text style={{ fontSize: 30 }}>{p.emoji}</Text>
+                                <View style={styles.predictionIndicator}>
+                                    <ChartIcon width={10} height={10} color="#ffffff" />
+                                </View>
+                            </View>
+                        </Marker>
+                    ))}
+
                     {!isNavigating && (
                         <>
                             {(showPredictions ? filteredPredictions : [])
                                 .filter(p => Array.isArray(p.fullPath) && p.fullPath.length >= 2)
-                                .map((p, index) => (
+                                .map((p) => (
                                     <Polyline
-                                        key={`auto-path-idx-${index}-${p.id || 'no-id'}`}
+                                        key={`auto-path-${p.id || p.scientific}`}
                                         coordinates={p.fullPath!.map(([lat, lon]) => ({ latitude: Number(lat), longitude: Number(lon) }))}
                                         strokeColor={p.color || '#F59E0B'}
                                         strokeWidth={3}
@@ -1100,6 +1147,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         </>
                     )}
                 </MapView>
+
+                {/* NO WILDLIFE INDICATOR */}
+                {!isWildlifeLoading && animalMarkers.length === 0 && reportMarkers.length === 0 && uiMode === UIMode.MAP && !safeRoute && (
+                    <View style={styles.noWildlifeContainer}>
+                        <Text style={styles.noWildlifeText}>No wildlife sightings in this area</Text>
+                    </View>
+                )}
 
                 <SafeAreaView style={styles.headerContainer}>
                     <View style={styles.headerContent}>
@@ -1599,6 +1653,10 @@ const styles = StyleSheet.create({
     screen: {
         flex: 1,
     },
+    map: {
+        ...StyleSheet.absoluteFillObject,
+        flex: 1,
+    },
     noWildlifeContainer: {
         position: 'absolute',
         top: 100,
@@ -1719,9 +1777,6 @@ const styles = StyleSheet.create({
         flex: 1,
         position: 'relative',
     },
-    map: {
-        flex: 1,
-    },
     alertBanner: {
         position: 'absolute',
         top: 16,
@@ -1780,6 +1835,22 @@ const styles = StyleSheet.create({
     markerContainer: {
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    predictionMarker: {
+        // Visual cue that it is a prediction
+    },
+    predictionIndicator: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: '#f59e0b',
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#ffffff',
     },
     historicalMarker: {
         opacity: 0.7,
