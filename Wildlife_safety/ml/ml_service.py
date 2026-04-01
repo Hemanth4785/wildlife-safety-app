@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from tensorflow.keras.models import load_model
@@ -81,6 +82,15 @@ async def lifespan(app: FastAPI):
     logger.info("ML Service shutting down...")
 
 app = FastAPI(title="Wildlife Safety ML Service", lifespan=lifespan)
+
+# Add CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- SCHEMAS ---
 class RiskRequest(BaseModel):
@@ -172,6 +182,7 @@ async def predict_movement(req: MovementRequest):
         logger.exception("Movement prediction failed:")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/predict", response_model=PredictionResponse)
 @app.post("/predict-risk", response_model=PredictionResponse)
 async def predict_risk(req: RiskRequest):
     """

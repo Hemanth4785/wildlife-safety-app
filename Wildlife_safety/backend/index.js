@@ -57,7 +57,7 @@ const ML_HYBRID_SCRIPT = path.join(ML_DIR, 'predict_wildlife_hybrid.py');
 const HEATMAP_PATH = path.join(__dirname, 'python', 'cache', 'corridor_heatmap.json');
 const ML_SEQ_SCRIPT = path.join(ML_DIR, 'predict_lstm_seq.py');
 const ML_MOVE_V2_SCRIPT = ML_SEQ_SCRIPT;
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "https://wildlife-safety-app-1.onrender.com";
 
 // Detect environment to use correct Python interpreter
 const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
@@ -130,7 +130,7 @@ const predictRiskML = async (payload) => {
             habitat_suitability: Number(payload.habitat_suitability) || 0.5
         };
 
-        const response = await axios.post(`${ML_SERVICE_URL}/predict-risk`, cleanPayload, { 
+        const response = await axios.post(`${ML_SERVICE_URL}/predict`, cleanPayload, { 
             timeout: 10000,
             headers: { 'Content-Type': 'application/json' }
         });
