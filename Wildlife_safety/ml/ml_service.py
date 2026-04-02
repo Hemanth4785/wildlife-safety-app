@@ -84,7 +84,11 @@ async def load_ml_assets():
                 import contextlib
                 # Production loading: skip compilation for speed and stability
                 with contextlib.redirect_stdout(None):
-                    assets['lstm_generic'] = load_model(LSTM_GENERIC_PATH, compile=False)
+                    assets['lstm_generic'] = load_model(
+                        LSTM_GENERIC_PATH,
+                        compile=False,
+                        safe_mode=False
+                    )
                 
                 # Validation: check input shape and run dummy inference
                 input_shape = assets['lstm_generic'].input_shape
