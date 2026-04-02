@@ -40,6 +40,7 @@ LSTM_GENERIC_PATH = os.path.join(BASE_DIR, "models", "lstm_seq.keras")
 SCALER_PATH = os.path.join(BASE_DIR, "models", "gps_scaler_seq.pkl")
 MAXENT_MODELS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_models.pkl")
 MAXENT_SCALERS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_scalers.pkl")
+HISTORICAL_CACHE_PATH = os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json")
 
 # Global state for ML assets
 assets = {
@@ -50,7 +51,8 @@ assets = {
     "lstm_generic": None,
     "gps_scaler": None,
     "maxent_models": None,
-    "maxent_scalers": None
+    "maxent_scalers": None,
+    "historical_data": {} # animal -> list of [lat, lon]
 }
 
 async def load_ml_assets():
@@ -89,6 +91,25 @@ async def load_ml_assets():
             assets['maxent_scalers'] = joblib.load(MAXENT_SCALERS_PATH)
             logger.info("MaxEnt models and scalers loaded.")
 
+        # 5. Load Historical Data for MaxEnt density scoring
+        if os.path.exists(HISTORICAL_CACHE_PATH):
+            try:
+                with open(HISTORICAL_CACHE_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # Group by animal for faster lookup
+                grouped = {}
+                for item in data:
+                    animal = (item.get('animal') or item.get('species') or 'generic').lower()
+                    if animal not in grouped: grouped[animal] = []
+                    try:
+                        grouped[animal].append([float(item['lat']), float(item['lon'])])
+                    except: continue
+                assets['historical_data'] = grouped
+                logger.info(f"Historical data loaded for {len(grouped)} species.")
+            except Exception as e:
+                logger.error(f"Historical data load failed: {str(e)}")
+
         assets["status"] = "ready"
         logger.info("All ML assets loaded successfully. Service is ready.")
 
@@ -96,10 +117,51 @@ async def load_ml_assets():
         assets["status"] = "error"
         logger.error(f"CRITICAL: Failed to load ML assets: {str(e)}")
 
+def calculate_suitability(animal: str, lat: float, lon: float) -> float:
+    """
+    Calculates habitat suitability score using MaxEnt logic:
+    70% MaxEnt Model (Logistic Regression) + 30% Historical Density
+    """
+    if assets["status"] != "ready": return 0.5
+    
+    animal_key = animal.lower()
+    model = None
+    scaler = None
+    
+    if assets['maxent_models'] and assets['maxent_scalers']:
+        model = assets['maxent_models'].get(animal) or assets['maxent_models'].get("Generic")
+        scaler = assets['maxent_scalers'].get(animal) or assets['maxent_scalers'].get("Generic")
+
+    # 1. Model Score (Logistic Regression)
+    model_score = 0.5
+    if model and scaler:
+        try:
+            X = np.array([[lat, lon]])
+            Xs = scaler.transform(X)
+            # Probability of class 1 (presence)
+            model_score = float(model.predict_proba(Xs)[0][1])
+        except: pass
+
+    # 2. Historical Density Score
+    density_score = 0.0
+    history = assets['historical_data'].get(animal_key) or assets['historical_data'].get('generic')
+    if history:
+        # Find distance to nearest point
+        min_dist = float('inf')
+        # Simple search for prototype; KDTree better for large data
+        for plat, plon in history:
+            d = haversine((lat, lon), (plat, plon))
+            if d < min_dist: min_dist = d
+        
+        if min_dist == 0: density_score = 1.0
+        else: density_score = float(np.exp(-min_dist)) # Decay score with distance
+
+    # 3. Weighted Combination
+    return round(0.7 * model_score + 0.3 * density_score, 3)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle management. Starts background loading immediately."""
-    # Start loading in background to avoid blocking port binding on Render
     asyncio.create_task(load_ml_assets())
     yield
     assets.clear()
@@ -113,7 +175,6 @@ app = FastAPI(
 )
 
 # --- CORS CONFIGURATION ---
-# Essential for frontend (React Native / Web) access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -133,7 +194,7 @@ class RiskRequest(BaseModel):
     distance_to_road: Optional[float] = None
     human_population: Optional[float] = None
     elevation: Optional[float] = None
-    habitat_suitability: Optional[float] = 0.5
+    habitat_suitability: Optional[float] = None
 
 class PredictionResponse(BaseModel):
     risk: str
@@ -144,10 +205,11 @@ class PredictionResponse(BaseModel):
     time_weight: float
     status: str = "success"
     model_info: Optional[str] = None
+    suitability: float = 0.5
 
 class MovementRequest(BaseModel):
     animal: str = "Elephant"
-    trajectory: List[List[float]] # [[lat, lon], ...]
+    trajectory: List[List[float]]
     steps: int = 3
 
 class MovementResponse(BaseModel):
@@ -157,45 +219,36 @@ class MovementResponse(BaseModel):
     suitability: float = 0.5
 
 # --- BASE ENDPOINTS ---
-
 @app.get("/")
 async def root():
-    """Root endpoint to verify service is online."""
-    return {
-        "message": "Wildlife Safety ML Service is running",
-        "status": assets["status"],
-        "docs": "/docs"
-    }
+    return {"message": "Wildlife Safety ML Service is running", "status": assets["status"], "docs": "/docs"}
 
 @app.get("/health")
 async def health():
-    """Health check endpoint for Render and internal monitoring."""
-    return {
-        "status": "ok" if assets["status"] == "ready" else assets["status"],
-        "version": "1.1.0",
-        "models_loaded": [k for k, v in assets.items() if v is not None and k != "status"]
-    }
+    return {"status": "ok" if assets["status"] == "ready" else assets["status"], "version": "1.1.0"}
 
 # --- ML ENDPOINTS ---
-
 @app.post("/predict", response_model=PredictionResponse)
 @app.post("/predict-risk", response_model=PredictionResponse)
 async def predict_risk(req: RiskRequest):
-    """Predict risk level for a specific animal sighting."""
     if assets["status"] != "ready":
-        raise HTTPException(status_code=503, detail="Models are still loading. Please try again in a few seconds.")
+        raise HTTPException(status_code=503, detail="Models are still loading.")
 
     try:
         models = assets['risk_models']
         encoders = assets['encoders']
         feature_order = assets.get('feature_order', {})
 
-        if not models or not encoders:
-            raise HTTPException(status_code=500, detail="Risk models not available")
-
         # 1. Feature Engineering
         time_weight = calculate_time_weight(req.sighting_date)
         dwater, water_found = await get_distance_to_water_async(req.latitude, req.longitude)
+        
+        # 2. Habitat Suitability (MaxEnt) - Calculate if not provided
+        suitability = req.habitat_suitability
+        if suitability is None and req.latitude is not None and req.longitude is not None:
+            suitability = calculate_suitability(req.animal, req.latitude, req.longitude)
+        elif suitability is None:
+            suitability = 0.5
 
         def safe_encode(col, value):
             le = encoders.get(col)
@@ -216,12 +269,11 @@ async def predict_risk(req: RiskRequest):
             'elevation': float(req.elevation) if req.elevation is not None else 500.0,
             'distance_km': float(req.distance_km),
             'time_weight': float(time_weight),
-            'habitat_suitability': float(req.habitat_suitability) if req.habitat_suitability is not None else 0.5
+            'habitat_suitability': float(suitability)
         }
 
-        # 2. Model Selection
+        # 3. Model Selection
         has_env = all(v is not None for v in [req.latitude, req.longitude, req.forest_density])
-        
         if has_env and 'Generic' in models:
             model = models['Generic']
             cols = feature_order.get('generic', list(vals.keys()))
@@ -233,7 +285,7 @@ async def predict_risk(req: RiskRequest):
         else:
             raise HTTPException(status_code=500, detail="No suitable ML model found")
 
-        # 3. Inference
+        # 4. Inference
         features = pd.DataFrame([[vals.get(c, 0.0) for c in cols]], columns=cols)
         risk_class = model.predict(features)[0]
         probs = model.predict_proba(features)[0]
@@ -246,7 +298,8 @@ async def predict_risk(req: RiskRequest):
             distance_to_water=round(dwater, 2),
             water_found=water_found,
             time_weight=round(time_weight, 2),
-            model_info=model_type
+            model_info=model_type,
+            suitability=suitability
         )
     except Exception as e:
         logger.exception("Risk prediction failed")
@@ -254,7 +307,6 @@ async def predict_risk(req: RiskRequest):
 
 @app.post("/predict-movement", response_model=MovementResponse)
 async def predict_movement(req: MovementRequest):
-    """Predict future animal movement using LSTM model."""
     if assets["status"] != "ready":
         raise HTTPException(status_code=503, detail="Models are still loading.")
 
@@ -262,21 +314,22 @@ async def predict_movement(req: MovementRequest):
         model = assets['lstm_generic']
         scaler = assets['gps_scaler']
         
-        if not model or not scaler:
-            # Fallback heuristic if LSTM is missing
-            predictions = []
-            last_lat, last_lon = req.trajectory[-1]
-            for i in range(req.steps):
-                last_lat += 0.002
-                last_lon += 0.002
-                predictions.append({"lat": round(last_lat, 5), "lon": round(last_lon, 5)})
-            return MovementResponse(model_used="Heuristic-Fallback", predictions=predictions)
+        last_lat, last_lon = req.trajectory[-1]
+        
+        # Calculate suitability for the current location using MaxEnt
+        current_suitability = calculate_suitability(req.animal, last_lat, last_lon)
 
-        # Preprocessing (similar to predict_lstm_seq.py)
+        if not model or not scaler:
+            predictions = []
+            for i in range(req.steps):
+                last_lat += 0.002; last_lon += 0.002
+                predictions.append({"lat": round(last_lat, 5), "lon": round(last_lon, 5)})
+            return MovementResponse(model_used="Heuristic-Fallback", predictions=predictions, suitability=current_suitability)
+
+        # Preprocessing
         WINDOW = 15
         coords_list = [[float(p[0]), float(p[1])] for p in req.trajectory]
-        while len(coords_list) < WINDOW:
-            coords_list.insert(0, coords_list[0])
+        while len(coords_list) < WINDOW: coords_list.insert(0, coords_list[0])
         
         seq = np.array(coords_list[-WINDOW:], dtype=np.float32)
         seq_n = scaler.transform(seq)
@@ -289,7 +342,6 @@ async def predict_movement(req: MovementRequest):
             plat, plon = float(y[0]), float(y[1])
             predictions.append({"lat": round(plat, 5), "lon": round(plon, 5)})
             
-            # Update sequence for next step
             y_scaled = scaler.transform(np.array([[plat, plon]], dtype=np.float32))[0]
             cur[:, :-1, :] = cur[:, 1:, :]
             cur[:, -1, :] = y_scaled
@@ -297,7 +349,7 @@ async def predict_movement(req: MovementRequest):
         return MovementResponse(
             model_used="LSTM-Generic",
             predictions=predictions,
-            suitability=0.6 # Placeholder for MaxEnt
+            suitability=current_suitability
         )
     except Exception as e:
         logger.exception("Movement prediction failed")
@@ -305,7 +357,6 @@ async def predict_movement(req: MovementRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # Correct port binding for Render
     port = int(os.environ.get("PORT", 10000))
     logger.info(f"Starting Wildlife ML Service on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
