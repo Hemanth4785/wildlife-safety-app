@@ -19,30 +19,40 @@ CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "
 WINDOW = 15
 
 def get_data():
-    """Load historical data or generate synthetic data if cache is empty/missing."""
     records = []
     if os.path.exists(CACHE_PATH):
         try:
             with open(CACHE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for r in data:
-                    lat, lon = r.get("lat"), r.get("lon")
-                    if lat and lon:
-                        records.append([float(lat), float(lon)])
+                arr = json.load(f)
+            start = datetime.fromisoformat("2020-01-01T00:00:00")
+            for r in arr:
+                try:
+                    d = datetime.fromisoformat(str(r.get("eventDate"))[:19])
+                except:
+                    continue
+                if d < start or d > datetime.utcnow():
+                    continue
+                try:
+                    lat = float(r.get("lat"))
+                    lon = float(r.get("lon"))
+                except:
+                    continue
+                if not (8.0 <= lat <= 13.5 and 76.0 <= lon <= 80.5):
+                    continue
+                records.append([lat, lon])
+            print(f"Loaded {len(records)} filtered historical records.")
         except Exception as e:
             print(f"Warning: Could not load cache: {e}")
 
     if len(records) < 100:
         print("Using synthetic data for training (insufficient historical data)...")
-        # Generate 1000 points of a wandering trajectory
         t = np.linspace(0, 100, 1000)
-        lat = 12.0 + 0.5 * np.sin(t/10) + 0.2 * np.random.normal(size=1000)
-        lon = 77.0 + 0.5 * np.cos(t/10) + 0.2 * np.random.normal(size=1000)
+        lat = 10.5 + 0.5 * np.sin(t/10) + 0.2 * np.random.normal(size=1000)
+        lon = 78.0 + 0.5 * np.cos(t/10) + 0.2 * np.random.normal(size=1000)
         records = np.column_stack([lat, lon])
     else:
-        print(f"Loaded {len(records)} historical records.")
         records = np.array(records)
-    
+
     return records
 
 def build_sequences(data):
