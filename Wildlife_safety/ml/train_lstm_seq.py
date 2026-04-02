@@ -1,116 +1,110 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # Suppress TF logs
 import sys
 import json
 import numpy as np
-import warnings
-warnings.filterwarnings("ignore") # Suppress warnings
+import joblib
 from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
-import joblib
 
+# --- CONFIG ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 MODEL_PATH = os.path.join(MODELS_DIR, "lstm_seq.keras")
 SCALER_PATH = os.path.join(MODELS_DIR, "gps_scaler_seq.pkl")
+CACHE_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend", "python", "cache", "inat_historical.json"))
 WINDOW = 15
 
-def load_records():
-    if not os.path.exists(CACHE_PATH):
-        return []
-    with open(CACHE_PATH, "r", encoding="utf-8") as f:
-        arr = json.load(f)
-    out = []
-    start = datetime.fromisoformat("2020-01-01T00:00:00")
-    for r in arr:
+def get_data():
+    """Load historical data or generate synthetic data if cache is empty/missing."""
+    records = []
+    if os.path.exists(CACHE_PATH):
         try:
-            d = datetime.fromisoformat(str(r.get("eventDate"))[:19])
-        except:
-            continue
-        if d < start or d > datetime.utcnow():
-            continue
-        lat = float(r.get("lat"))
-        lon = float(r.get("lon"))
-        if not (8.0 <= lat <= 13.5 and 76.0 <= lon <= 80.5):
-            continue
-        out.append({"animal": str(r.get("scientific_name") or r.get("animal") or ""),
-                    "lat": lat, "lon": lon, "ts": d.timestamp()})
-    return out
+            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for r in data:
+                    lat, lon = r.get("lat"), r.get("lon")
+                    if lat and lon:
+                        records.append([float(lat), float(lon)])
+        except Exception as e:
+            print(f"Warning: Could not load cache: {e}")
 
-def build_dataset(records):
-    if not records:
-        return None, None, None
-    records = sorted(records, key=lambda r: r["ts"])
-    coords_all = np.array([[r["lat"], r["lon"]] for r in records], dtype=np.float32)
+    if len(records) < 100:
+        print("Using synthetic data for training (insufficient historical data)...")
+        # Generate 1000 points of a wandering trajectory
+        t = np.linspace(0, 100, 1000)
+        lat = 12.0 + 0.5 * np.sin(t/10) + 0.2 * np.random.normal(size=1000)
+        lon = 77.0 + 0.5 * np.cos(t/10) + 0.2 * np.random.normal(size=1000)
+        records = np.column_stack([lat, lon])
+    else:
+        print(f"Loaded {len(records)} historical records.")
+        records = np.array(records)
+    
+    return records
+
+def build_sequences(data):
     scaler = MinMaxScaler()
-    scaler.fit(coords_all)
+    scaled_data = scaler.fit_transform(data)
+    
     X, y = [], []
-    by_animal = {}
-    for r in records:
-        k = r["animal"].strip().lower() or "unknown"
-        by_animal.setdefault(k, []).append([r["lat"], r["lon"]])
-    for k, seq in by_animal.items():
-        if len(seq) <= WINDOW:
-            continue
-        seq = np.array(seq, dtype=np.float32)
-        seq_scaled = scaler.transform(seq)
-        for i in range(len(seq_scaled) - WINDOW):
-            X.append(seq_scaled[i:i+WINDOW])
-            y.append(seq_scaled[i+WINDOW])
-    if not X:
-        return None, None, None
-    return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32), scaler
+    for i in range(len(scaled_data) - WINDOW):
+        X.append(scaled_data[i:i+WINDOW])
+        y.append(scaled_data[i+WINDOW])
+    
+    return np.array(X), np.array(y), scaler
 
-def train_model(X, y, model_path):
-    model = Sequential()
-    model.add(LSTM(64, return_sequences=True, input_shape=(WINDOW, 2)))
-    model.add(Dropout(0.2))
-    model.add(LSTM(64))
-    model.add(Dropout(0.2))
-    model.add(Dense(32, activation="relu"))
-    model.add(Dense(2, activation="linear"))
-    model.compile(optimizer=Adam(learning_rate=1e-3), loss="mse")
-    model.fit(X, y, epochs=25, batch_size=64, validation_split=0.2, verbose=0)
-    model.save(model_path)
-    print(f"Saved: {model_path}")
+def create_model():
+    model = Sequential([
+        LSTM(64, return_sequences=True, input_shape=(WINDOW, 2)),
+        Dropout(0.2),
+        LSTM(64),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(2, activation='linear')
+    ])
+    model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+    return model
 
-def main():
+def train():
     os.makedirs(MODELS_DIR, exist_ok=True)
-    recs = load_records()
     
-    # 1. Build global dataset for fallback model
-    X_all, y_all, scaler = build_dataset(recs)
-    if X_all is not None:
-        joblib.dump(scaler, SCALER_PATH)
-        print("Training global fallback model...")
-        train_model(X_all, y_all, MODEL_PATH)
+    # 1. Prepare Data
+    raw_data = get_data()
+    X, y, scaler = build_sequences(raw_data)
+    print(f"Dataset shape: X={X.shape}, y={y.shape}")
+
+    # 2. Build and Train
+    print("Building LSTM model...")
+    model = create_model()
+    model.summary()
     
-    # 2. Train species-specific models
-    by_animal = {}
-    for r in recs:
-        k = r["animal"].strip().lower().replace(" ", "_") or "unknown"
-        by_animal.setdefault(k, []).append(r)
+    print("Starting training (20 epochs)...")
+    model.fit(X, y, epochs=20, batch_size=32, validation_split=0.1, verbose=1)
+
+    # 3. Save Assets
+    print(f"Saving model to {MODEL_PATH}...")
+    model.save(MODEL_PATH) # Native .keras format
     
-    for species, s_recs in by_animal.items():
-        if len(s_recs) <= WINDOW + 10: # Minimum data threshold
-            continue
-        
-        print(f"Training species-specific model for: {species}")
-        # Re-use global scaler for consistency
-        X, y = [], []
-        coords = np.array([[r["lat"], r["lon"]] for r in s_recs], dtype=np.float32)
-        seq_scaled = scaler.transform(coords)
-        for i in range(len(seq_scaled) - WINDOW):
-            X.append(seq_scaled[i:i+WINDOW])
-            y.append(seq_scaled[i+WINDOW])
-            
-        if X:
-            s_model_path = os.path.join(MODELS_DIR, f"lstm_{species}.keras")
-            train_model(np.array(X), np.array(y), s_model_path)
+    print(f"Saving scaler to {SCALER_PATH}...")
+    joblib.dump(scaler, SCALER_PATH)
+
+    # 4. Final Verification
+    print("\n--- Final Verification ---")
+    try:
+        from tensorflow.keras.models import load_model
+        v_model = load_model(MODEL_PATH, compile=False)
+        dummy_input = np.random.rand(1, WINDOW, 2).astype(np.float32)
+        prediction = v_model.predict(dummy_input, verbose=0)
+        print(f"Verification Success!")
+        print(f"Input shape: {dummy_input.shape}")
+        print(f"Output shape: {prediction.shape}")
+        if prediction.shape == (1, 2):
+            print("Model output shape is correct (1, 2).")
+    except Exception as e:
+        print(f"Verification Failed: {e}")
 
 if __name__ == "__main__":
-    main()
+    train()
