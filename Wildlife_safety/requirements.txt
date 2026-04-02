@@ -1,11 +1,11 @@
 fastapi 
 uvicorn 
-tensorflow-cpu 
-scikit-learn 
+tensorflow-cpu==2.15.0 
+scikit-learn==1.2.2 
 pandas 
 numpy 
 haversine 
 joblib 
 python-multipart 
 requests 
-httpx
+httpx 
