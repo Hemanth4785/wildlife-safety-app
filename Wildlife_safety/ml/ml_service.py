@@ -159,7 +159,7 @@ def calculate_suitability(animal: str, lat: float, lon: float) -> float:
     if history:
         min_dist = float('inf')
         for plat, plon in history:
-            d = haversine((lat, lon), (plat, plon))
+            d = haversine(lat, lon, plat, plon)
             if d < min_dist: min_dist = d
         density_score = float(np.exp(-min_dist)) if min_dist != 0 else 1.0
     return round(0.7 * model_score + 0.3 * density_score, 3)
