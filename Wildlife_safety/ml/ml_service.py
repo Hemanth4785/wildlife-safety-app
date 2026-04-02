@@ -75,11 +75,19 @@ async def load_ml_assets():
         if os.path.exists(LSTM_GENERIC_PATH):
             try:
                 import contextlib
+                # First attempt: Native load
                 with contextlib.redirect_stdout(None):
                     assets['lstm_generic'] = load_model(LSTM_GENERIC_PATH, compile=False)
                 logger.info(f"Generic LSTM model loaded from {LSTM_GENERIC_PATH}")
             except Exception as e:
-                logger.error(f"LSTM load failed: {str(e)}")
+                # Specific handling for the "lstm_cell expected 3 variables" error
+                error_msg = str(e)
+                logger.error(f"LSTM load failed: {error_msg}")
+                if "expected 3 variables" in error_msg:
+                    logger.warning("Detected Keras serialization mismatch. Please run 'resave_lstm.py' to fix the model format.")
+                
+                # Fallback to None instead of letting the entire asset load fail
+                assets['lstm_generic'] = None
 
         if os.path.exists(SCALER_PATH):
             assets['gps_scaler'] = joblib.load(SCALER_PATH)
