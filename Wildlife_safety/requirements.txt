@@ -8,3 +8,4 @@ haversine
 joblib 
 python-multipart 
 requests 
+httpx
