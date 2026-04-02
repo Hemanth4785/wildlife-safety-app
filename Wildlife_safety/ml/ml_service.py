@@ -6,8 +6,10 @@ import asyncio
 import numpy as np
 import pandas as pd
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import time
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from tensorflow.keras.models import load_model
@@ -30,6 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger("ML-Service")
 
 # --- GLOBAL CONFIG & PATHS ---
+DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 logger.info(f"BASE_DIR: {BASE_DIR}")
 
@@ -190,6 +193,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    # Extract request info
+    path = request.url.path
+    method = request.method
+    
+    # Log incoming request (headers only for safety unless in debug mode)
+    if DEBUG_MODE:
+        logger.info(f"Incoming {method} {path}")
+        # body = await request.body() # Careful with large bodies
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # Log response info
+        logger.info(f"{method} {path} - {response.status_code} - {process_time:.4f}s")
+        return response
+    except Exception as e:
+        logger.error(f"Request failed: {method} {path} - Error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "Internal Server Error", "detail": str(e) if DEBUG_MODE else "Check server logs"}
+        )
+
 # --- SCHEMAS ---
 class RiskRequest(BaseModel):
     animal: str = Field(default="Elephant", description="Animal species name")
@@ -232,6 +262,7 @@ async def root():
         "message": "Wildlife Safety ML Service is running",
         "status": assets["status"],
         "version": "1.1.1",
+        "debug": DEBUG_MODE,
         "docs": "/docs"
     }
 
@@ -307,7 +338,11 @@ async def predict_movement(req: MovementRequest):
     if assets["status"] != "ready":
         raise HTTPException(status_code=503, detail="Models are still loading.")
     try:
-        logger.info(f"Movement prediction requested for {req.animal} with {len(req.trajectory)} points")
+        if DEBUG_MODE:
+            logger.info(f"Movement prediction requested: {req.json()}")
+        else:
+            logger.info(f"Movement prediction requested for {req.animal} with {len(req.trajectory)} points")
+        
         model = assets['lstm_generic']
         scaler = assets['gps_scaler']
         last_lat, last_lon = req.trajectory[-1]
