@@ -1,2 +1,10 @@
-requests>=2.31.0
-python-dateutil>=2.8.2
+fastapi 
+uvicorn 
+tensorflow-cpu 
+scikit-learn 
+pandas 
+numpy 
+haversine 
+joblib 
+python-multipart 
+requests 
