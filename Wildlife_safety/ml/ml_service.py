@@ -39,6 +39,7 @@ FEATURE_ORDER_PATH = os.path.join(BASE_DIR, "feature_order.json")
 
 # LSTM and MaxEnt assets - Using Absolute Paths for Render
 LSTM_GENERIC_PATH = os.path.abspath(os.path.join(BASE_DIR, "models", "lstm_seq.keras"))
+LSTM_WEIGHTS_PATH = os.path.abspath(os.path.join(BASE_DIR, "models", "lstm_weights.h5"))
 SCALER_PATH = os.path.join(BASE_DIR, "models", "gps_scaler_seq.pkl")
 MAXENT_MODELS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_models.pkl")
 MAXENT_SCALERS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_scalers.pkl")
@@ -76,34 +77,34 @@ async def load_ml_assets():
             logger.info("Feature order config loaded.")
 
         # 3. Load LSTM and Scaler
-        logger.info(f"Attempting to load LSTM from: {LSTM_GENERIC_PATH}")
-        logger.info(f"File exists at path: {os.path.exists(LSTM_GENERIC_PATH)}")
+        logger.info(f"Attempting to load LSTM from: {LSTM_WEIGHTS_PATH}")
+        logger.info(f"Weights file exists: {os.path.exists(LSTM_WEIGHTS_PATH)}")
 
-        if os.path.exists(LSTM_GENERIC_PATH):
+        if os.path.exists(LSTM_WEIGHTS_PATH):
             try:
-                import contextlib
-                # Production loading: skip compilation for speed and stability
-                with contextlib.redirect_stdout(None):
-                    assets['lstm_generic'] = load_model(
-                        LSTM_GENERIC_PATH,
-                        compile=False,
-                        safe_mode=False
-                    )
+                import tensorflow as tf
+                # Rebuild architecture exactly as trained to bypass serialization bugs
+                model = tf.keras.Sequential([
+                    tf.keras.layers.LSTM(64, return_sequences=True, input_shape=(15, 2)),
+                    tf.keras.layers.Dropout(0.2),
+                    tf.keras.layers.LSTM(64),
+                    tf.keras.layers.Dropout(0.2),
+                    tf.keras.layers.Dense(32, activation='relu'),
+                    tf.keras.layers.Dense(2, activation='linear')
+                ])
+                model.load_weights(LSTM_WEIGHTS_PATH)
                 
                 # Validation: check input shape and run dummy inference
-                input_shape = assets['lstm_generic'].input_shape
-                dummy_input = np.random.rand(1, 15, 2).astype(np.float32)
-                assets['lstm_generic'].predict(dummy_input, verbose=0)
+                dummy_input = np.zeros((1, 15, 2), dtype=np.float32)
+                model.predict(dummy_input, verbose=0)
                 
-                logger.info(f"LSTM model verified and loaded successfully. Input shape: {input_shape}")
+                assets['lstm_generic'] = model
+                logger.info(f"LSTM model verified and loaded successfully using weights. Input shape: {model.input_shape}")
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"LSTM failed to load or verify: {error_msg}")
-                if "expected 3 variables" in error_msg:
-                    logger.warning("Detected persistent serialization mismatch. Please ensure you ran the UPDATED 'resave_lstm.py'.")
+                logger.error(f"LSTM failed to load or verify via weights: {e}")
                 assets['lstm_generic'] = None # Safe fallback
         else:
-            logger.warning(f"LSTM model file not found at {LSTM_GENERIC_PATH}")
+            logger.warning(f"LSTM weights file not found at {LSTM_WEIGHTS_PATH}")
 
         if os.path.exists(SCALER_PATH):
             assets['gps_scaler'] = joblib.load(SCALER_PATH)

@@ -88,6 +88,11 @@ def train():
     print(f"Saving model to {MODEL_PATH}...")
     model.save(MODEL_PATH) # Native .keras format
     
+    # Also save weights to .h5 for robust cross-platform loading
+    weights_path = os.path.join(MODELS_DIR, "lstm_weights.h5")
+    model.save_weights(weights_path)
+    print(f"Weights saved to {weights_path}")
+    
     print(f"Saving scaler to {SCALER_PATH}...")
     joblib.dump(scaler, SCALER_PATH)
 
