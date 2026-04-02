@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: wildlife-safety-ml
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn Wildlife_safety.ml.ml_service:app --host 0.0.0.0 --port $PORT
