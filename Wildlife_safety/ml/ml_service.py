@@ -31,12 +31,14 @@ logger = logging.getLogger("ML-Service")
 
 # --- GLOBAL CONFIG & PATHS ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+logger.info(f"BASE_DIR: {BASE_DIR}")
+
 MODELS_PATH = os.path.join(BASE_DIR, "risk_models.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "encoders.pkl")
 FEATURE_ORDER_PATH = os.path.join(BASE_DIR, "feature_order.json")
 
-# LSTM and MaxEnt assets
-LSTM_GENERIC_PATH = os.path.join(BASE_DIR, "models", "lstm_seq.keras")
+# LSTM and MaxEnt assets - Using Absolute Paths for Render
+LSTM_GENERIC_PATH = os.path.abspath(os.path.join(BASE_DIR, "models", "lstm_seq.keras"))
 SCALER_PATH = os.path.join(BASE_DIR, "models", "gps_scaler_seq.pkl")
 MAXENT_MODELS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_models.pkl")
 MAXENT_SCALERS_PATH = os.path.join(BASE_DIR, "models", "maxent", "maxent_scalers.pkl")
@@ -74,6 +76,9 @@ async def load_ml_assets():
             logger.info("Feature order config loaded.")
 
         # 3. Load LSTM and Scaler
+        logger.info(f"Attempting to load LSTM from: {LSTM_GENERIC_PATH}")
+        logger.info(f"File exists at path: {os.path.exists(LSTM_GENERIC_PATH)}")
+
         if os.path.exists(LSTM_GENERIC_PATH):
             try:
                 import contextlib

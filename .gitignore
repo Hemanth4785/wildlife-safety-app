@@ -88,9 +88,10 @@ __pycache__/
 *.pyc
 
 # ML artifacts
-# We are now tracking model files for production deployment
+# We are tracking verified .keras models for production deployment
+# DO NOT ignore .keras files
 *.h5
-*.keras
+!*.keras
 
 # OS junk files
 Thumbs.db
