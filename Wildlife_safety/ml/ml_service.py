@@ -77,18 +77,24 @@ async def load_ml_assets():
         if os.path.exists(LSTM_GENERIC_PATH):
             try:
                 import contextlib
-                # Load with compile=False for production efficiency
+                # Production loading: skip compilation for speed and stability
                 with contextlib.redirect_stdout(None):
                     assets['lstm_generic'] = load_model(LSTM_GENERIC_PATH, compile=False)
                 
-                # Verify input shape (Expected: (None, 15, 2))
+                # Validation: check input shape and run dummy inference
                 input_shape = assets['lstm_generic'].input_shape
-                logger.info(f"LSTM model loaded successfully from {LSTM_GENERIC_PATH}. Input shape: {input_shape}")
+                dummy_input = np.random.rand(1, 15, 2).astype(np.float32)
+                assets['lstm_generic'].predict(dummy_input, verbose=0)
+                
+                logger.info(f"LSTM model verified and loaded successfully. Input shape: {input_shape}")
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"LSTM failed to load: {error_msg}")
+                logger.error(f"LSTM failed to load or verify: {error_msg}")
                 if "expected 3 variables" in error_msg:
-                    logger.warning("Detected Keras serialization mismatch. Please ensure 'lstm_seq.keras' is used.")
+                    logger.warning("Detected persistent serialization mismatch. Please ensure you ran the UPDATED 'resave_lstm.py'.")
+                assets['lstm_generic'] = None # Safe fallback
+        else:
+            logger.warning(f"LSTM model file not found at {LSTM_GENERIC_PATH}")
 
         if os.path.exists(SCALER_PATH):
             assets['gps_scaler'] = joblib.load(SCALER_PATH)
