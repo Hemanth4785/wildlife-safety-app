@@ -37,7 +37,7 @@ def get_data():
                     lon = float(r.get("lon"))
                 except:
                     continue
-                if not (8.0 <= lat <= 13.5 and 76.0 <= lon <= 80.5):
+                if not (8.0 <= lat <= 19.0 and 74.0 <= lon <= 84.0):
                     continue
                 records.append([lat, lon])
             print(f"Loaded {len(records)} filtered historical records.")
@@ -47,8 +47,8 @@ def get_data():
     if len(records) < 100:
         print("Using synthetic data for training (insufficient historical data)...")
         t = np.linspace(0, 100, 1000)
-        lat = 10.5 + 0.5 * np.sin(t/10) + 0.2 * np.random.normal(size=1000)
-        lon = 78.0 + 0.5 * np.cos(t/10) + 0.2 * np.random.normal(size=1000)
+        lat = 13.0 + 2.0 * np.sin(t/10) + 0.3 * np.random.normal(size=1000)
+        lon = 79.0 + 2.0 * np.cos(t/10) + 0.3 * np.random.normal(size=1000)
         records = np.column_stack([lat, lon])
     else:
         records = np.array(records)
