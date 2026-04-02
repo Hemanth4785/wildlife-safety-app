@@ -119,8 +119,12 @@ async def load_ml_assets():
         # 5. Load Historical Data
         if os.path.exists(HISTORICAL_CACHE_PATH):
             try:
-                with open(HISTORICAL_CACHE_PATH, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                # Use a separate thread to avoid blocking the event loop for I/O
+                def load_json():
+                    with open(HISTORICAL_CACHE_PATH, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                
+                data = await asyncio.to_thread(load_json)
                 grouped = {}
                 for item in data:
                     animal = (item.get('animal') or item.get('species') or 'generic').lower()
