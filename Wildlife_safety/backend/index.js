@@ -59,59 +59,34 @@ const ML_SEQ_SCRIPT = path.join(ML_DIR, 'predict_lstm_seq.py');
 const ML_MOVE_V2_SCRIPT = ML_SEQ_SCRIPT;
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "https://wildlife-safety-app-1.onrender.com";
 
-// Detect environment to use correct Python interpreter
+// Detect environment
 const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
 
-// Force ML to use Python 3.10 virtual environment if available (Local Dev)
-// On Render, we use the global 'python3' command.
+// Force Python path for background scripts (not for ML service spawning)
 const LOCAL_PYTHON = path.join(__dirname, "..", "lstm_env", process.platform === 'win32' ? path.join("Scripts", "python.exe") : path.join("bin", "python3"));
 const ML_PYTHON_EXE = isProduction ? "python3" : (fs.existsSync(LOCAL_PYTHON) ? LOCAL_PYTHON : "python3");
 
-// Function to start FastAPI ML Service
-const startMLService = () => {
-    console.log("[ML-Service] Starting FastAPI ML Service...");
-    const mlProcess = execFile(ML_PYTHON_EXE, ["-m", "uvicorn", "ml.ml_service:app", "--host", "0.0.0.0", "--port", "8000"], {
-        cwd: path.resolve(__dirname, ".."),
-        env: { ...process.env, PYTHONPATH: path.resolve(__dirname, "..") }
-    }, (error) => {
-        if (error) {
-            console.error("[ML-Service] Crashed or failed to start:", error.message);
-        }
-    });
-
-    mlProcess.stdout.on('data', (data) => console.log(`[ML-Service-Log] ${data.trim()}`));
-    mlProcess.stderr.on('data', (data) => console.error(`[ML-Service-Error] ${data.trim()}`));
-    
-    // Graceful shutdown
-    process.on('SIGTERM', () => mlProcess.kill());
-    process.on('SIGINT', () => mlProcess.kill());
-
-    return mlProcess;
-};
-
 // Helper to check if ML service is ready
 const checkMLServiceHealth = async (retries = 5) => {
+    console.log(`[ML-Service] Connecting to ML service at ${ML_SERVICE_URL}...`);
     for (let i = 0; i < retries; i++) {
         try {
-            const resp = await axios.get(`${ML_SERVICE_URL}/health`, { timeout: 2000 });
+            const resp = await axios.get(`${ML_SERVICE_URL}/health`, { timeout: 5000 });
             if (resp.data.status === 'ok') {
-                console.log("[ML-Service] Health check passed.");
+                console.log("[ML-Service] ML Service Connected.");
                 return true;
             }
         } catch (e) {
-            console.log(`[ML-Service] Waiting for ML service to start (attempt ${i + 1}/${retries})...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            console.log(`[ML-Service] Waiting for ML service (attempt ${i + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
         }
     }
+    console.warn("[ML-Service] Could not connect to ML service. Will use fallbacks.");
     return false;
 };
 
-// Start the ML service in production or if not already running
-let mlServiceProcess = null;
-if (isProduction || !process.env.ML_SERVICE_URL) {
-    mlServiceProcess = startMLService();
-    checkMLServiceHealth();
-}
+// Connect to the deployed ML service
+checkMLServiceHealth();
 
 // Helper to run ML predictions via HTTP to the FastAPI service
 const predictRiskML = async (payload) => {

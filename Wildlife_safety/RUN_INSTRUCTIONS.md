@@ -81,7 +81,7 @@ npm install
 # Start the server
 node backend/index.js
 ```
-*Server runs on: `http://10.18.247.199:3000` (your LAN IP)*
+*Server runs on: `https://wildlife-safety-api.onrender.com`*
 
 ### Terminal 2: Mobile/Web Frontend
 Starts the Expo development server.

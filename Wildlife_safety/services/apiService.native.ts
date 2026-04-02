@@ -12,6 +12,8 @@ let wildlifeAllCacheAt = 0;
 // Helper to get API Base URL
 const getApiBaseUrl = (): string | null => {
     const url = API_BASE_URL;
+    // Log the URL at startup for debugging
+    console.log(`[API] Using API Base URL: ${url}`);
     if (!url) {
         logger.warn('[API] API_BASE_URL is missing!');
     }
@@ -29,10 +31,10 @@ const distKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }
 };
 
 // Native-safe fetch implementation (no CORS proxy needed)
-const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, backoff = 2000): Promise<any> => {
+const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, backoff = 3000): Promise<any> => {
     try {
-        // ISSUE: Increase timeout to 60 seconds for production stability (ML & Render cold starts)
-        const timeout = 60000;
+        // Increased timeout to 90 seconds for Render cold starts
+        const timeout = 90000;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -45,11 +47,12 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
             },
         };
 
+        logger.info(`[API] Fetching: ${url}`);
         const response = await fetch(url, mergedOptions);
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-            logger.warn(`API request to ${url} returned status ${response.status}`);
+            logger.warn(`[API] Request to ${url} failed with status ${response.status}`);
             return { 
                 status: 'degraded', 
                 error: true, 
@@ -58,27 +61,27 @@ const nativeFetch = async (url: string, options: RequestInit = {}, retries = 0, 
             };
         }
         const data = await response.json();
-        logger.debug(`[API] Success from ${url.split('?')[0]}`);
+        logger.info(`[API] Success from ${url.split('?')[0]}`);
         return data;
     } catch (error: any) {
         const isAbort = error.name === 'AbortError' || error.message?.includes('Aborted');
         
         if (retries > 0 && !isAbort && (error.message?.includes('Network request failed') || error.message?.includes('network'))) {
-             logger.warn(`Fetch failed (network). Retrying in ${backoff}ms... (${retries} attempts left)`, error);
+             logger.warn(`[API] Network error. Retrying in ${backoff}ms... (${retries} attempts left)`);
              await new Promise(resolve => setTimeout(resolve, backoff));
              return nativeFetch(url, options, retries - 1, backoff * 2);
         }
         
         if (isAbort) {
-            logger.error(`Critical fetch failure for ${url} - Request timed out after 60s (Aborted)`, { error: error.message });
+            logger.error(`[API] Critical fetch failure for ${url} - Request timed out after 90s`, { error: error.message });
         } else {
-            logger.error(`Critical fetch failure for ${url}`, error);
+            logger.error(`[API] Critical fetch failure for ${url}`, error);
         }
         
         return { 
             status: 'degraded', 
             error: true, 
-            message: isAbort ? "Request timed out" : (error.message || "Network error")
+            message: isAbort ? "Request timed out. Please try again." : (error.message || "A network error occurred.")
         };
     }
 };

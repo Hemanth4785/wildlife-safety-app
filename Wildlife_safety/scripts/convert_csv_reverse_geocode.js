@@ -38,7 +38,7 @@ function joinCSVLine(arr) {
 }
 
 async function geocode(lat, lon) {
-  const url = `http://10.18.247.199:3000/api/reverse-geocode?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+  const url = `https://wildlife-safety-api.onrender.com/api/reverse-geocode?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
   const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
   if (!res.ok) return 'Unknown wildlife area';
   const j = await res.json();

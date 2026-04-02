@@ -11,14 +11,9 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from tensorflow.keras.models import load_model
 
-# Try to handle imports for both direct execution and module execution
-try:
-    from utils import haversine, calculate_time_weight
-    from water_distance import get_distance_to_water_async
-except ImportError:
-    # This fallback is for local testing, not for production
-    from .utils import haversine, calculate_time_weight
-    from .water_distance import get_distance_to_water_async
+# Use relative imports for the ml package
+from .utils import haversine, calculate_time_weight
+from .water_distance import get_distance_to_water_async
 
 # Configure logging
 logging.basicConfig(
@@ -287,6 +282,44 @@ async def health():
         "status": "ok", 
         "models_loaded": list(assets.keys()),
         "base_dir": BASE_DIR
+    }
+
+@app.get("/debug-models")
+async def debug_models():
+    """Debug endpoint to verify model behavior with sample inputs."""
+    results = {}
+    
+    # 1. Test Random Forest (Risk Prediction)
+    try:
+        sample_risk_req = RiskRequest(
+            animal="Elephant",
+            latitude=12.9716,
+            longitude=77.5946,
+            distance_km=0.5,
+            forest_density=0.8,
+            sighting_date="2024-01-01"
+        )
+        risk_res = await predict_risk(sample_risk_req)
+        results["risk_prediction"] = risk_res
+    except Exception as e:
+        results["risk_prediction_error"] = str(e)
+        
+    # 2. Test LSTM (Movement Prediction)
+    try:
+        sample_move_req = MovementRequest(
+            animal="Elephant",
+            trajectory=[[12.9, 79.1]],
+            steps=3
+        )
+        move_res = await predict_movement(sample_move_req)
+        results["movement_prediction"] = move_res
+    except Exception as e:
+        results["movement_prediction_error"] = str(e)
+        
+    return {
+        "status": "debug_complete",
+        "assets_loaded": list(assets.keys()),
+        "test_results": results
     }
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import json
 import os
 import asyncio
 import logging
-from utils import haversine
+from .utils import haversine
 
 # Configure logger
 logger = logging.getLogger(__name__)

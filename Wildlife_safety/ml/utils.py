@@ -40,23 +40,30 @@ def haversine(lat1, lon1, lat2, lon2):
         logger.error(f"Error in Haversine calculation: {str(e)}")
         return 999.0
 
-def calculate_time_weight(sighting_date_str):
+def calculate_time_weight(val):
     """
     Implement time-based weighting for sightings.
-    weight = max(0, 1 - (days_old / 30))
-    Prioritizes recent sightings within a 30-day window.
+    If val is an int/float, it's treated as an hour of the day.
+    If val is a string, it's treated as a sighting date (original behavior).
     """
     try:
-        if not sighting_date_str:
-            return 0.0
+        if val is None:
+            return 0.5
             
-        # Parse date, handling potential 'Z' or other ISO formats
-        # We assume sighting_date is already an ISO string from iNaturalist
-        dt_str = str(sighting_date_str).replace('Z', '')
-        if 'T' in dt_str:
-            sighting_date = datetime.fromisoformat(dt_str[:19])
+        # Case 1: Value is an hour (as requested in the prompt)
+        if isinstance(val, (int, float)):
+            hour = int(val)
+            # Higher weight during dawn (5-8) and dusk (18-21)
+            if (5 <= hour <= 8) or (18 <= hour <= 21):
+                return 1.0
+            return 0.5
+            
+        # Case 2: Value is a date string (original logic for ml_service.py)
+        sighting_date_str = str(val).replace('Z', '')
+        if 'T' in sighting_date_str:
+            sighting_date = datetime.fromisoformat(sighting_date_str[:19])
         else:
-            sighting_date = datetime.strptime(dt_str[:10], "%Y-%m-%d")
+            sighting_date = datetime.strptime(sighting_date_str[:10], "%Y-%m-%d")
             
         now = datetime.now()
         days_old = (now - sighting_date).days
@@ -64,6 +71,7 @@ def calculate_time_weight(sighting_date_str):
         # 30-day decay window
         weight = max(0, 1 - (days_old / 30))
         return round(weight, 3)
+        
     except Exception as e:
         logger.error(f"Error calculating time weight: {str(e)}")
         return 0.5 # Default fallback weight

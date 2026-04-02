@@ -10,7 +10,7 @@ const payload = {
 
 async function main() {
   try {
-    const resp = await fetch("http://10.18.247.199:3000/api/predict-movement", {
+    const resp = await fetch("https://wildlife-safety-api.onrender.com/api/predict-movement", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
