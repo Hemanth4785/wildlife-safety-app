@@ -338,6 +338,25 @@ app.use(
 );
 app.use(express.json({ limit: '10mb' }));
 
+/**
+ * Compatibility routes (no /api prefix).
+ * Mobile app calls /health, /wildlife/recent, /weather, /overpass.
+ * Backend primary routes live under /api/*.
+ */
+app.get('/health', (req, res) => res.redirect(307, '/api/health'));
+app.get('/wildlife/recent', (req, res) => {
+    const qs = new URLSearchParams(req.query).toString();
+    res.redirect(307, `/api/wildlife/recent${qs ? `?${qs}` : ''}`);
+});
+app.get('/weather', (req, res) => {
+    const qs = new URLSearchParams(req.query).toString();
+    res.redirect(307, `/api/weather${qs ? `?${qs}` : ''}`);
+});
+app.get('/overpass', (req, res) => {
+    const qs = new URLSearchParams(req.query).toString();
+    res.redirect(307, `/api/overpass${qs ? `?${qs}` : ''}`);
+});
+
 // --- Base Routes ---
 app.get('/', (req, res) => {
     res.send('Wildlife Safety API is running. Use /api/health to check status.');
