@@ -1,0 +1,24 @@
+# Root ignores
+node_modules/
+.git/
+.vscode/
+*.log
+
+# No need to ignore ml/ or backend/ here because they are now 
+# outside the "app/" directory and won't be picked up by EAS 
+# when running from within "app/".
+
+# Ignore local build artifacts
+dist/
+build/
+
+# Ignore large frontend data if any
+*.csv
+*.h5
+*.pkl
+*.pt
+*.npy
+*.ipynb
+
+# Documentation
+*.md
