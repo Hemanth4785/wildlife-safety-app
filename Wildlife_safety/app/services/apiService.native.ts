@@ -58,6 +58,60 @@ const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs =
     }
 };
 
+type MlPredictResult = {
+    path: { lat: number; lon: number; address?: string }[];
+    raw: any;
+    error?: boolean;
+    message?: string;
+};
+
+const mlPredict = async (mlUrl: string, payload: any): Promise<MlPredictResult> => {
+    try {
+        const endpoint = `${String(mlUrl).replace(/\/+$/, '')}/predict`;
+        const body = safeObject(payload);
+        const res = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
+        } as any, 20000);
+
+        let data: any = null;
+        try {
+            data = await (res as any).json();
+        } catch {
+            data = null;
+        }
+        console.log("ML API Response:", data);
+
+        if (!res.ok) {
+            return {
+                path: [],
+                raw: data || {},
+                error: true,
+                message: `Prediction failed (HTTP ${res.status})`,
+            };
+        }
+
+        const raw = data || {};
+        const positions = Array.isArray(raw?.predicted_positions)
+            ? raw.predicted_positions
+            : (Array.isArray(raw?.path) ? raw.path : []);
+
+        const path = Array.isArray(positions)
+            ? positions.map((p: any) => ({
+                lat: Number(p?.lat ?? p?.[0]),
+                lon: Number(p?.lon ?? p?.[1]),
+                address: typeof p?.address === 'string' ? p.address : undefined,
+            })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+            : [];
+
+        return { path, raw };
+    } catch (e: any) {
+        logger.warn('[ML] predict failed', e);
+        return { path: [], raw: {}, error: true, message: 'Prediction failed' };
+    }
+};
+
 /** Never return undefined — callers may use Object.keys / spread safely. */
 const normalizeApiPayload = (raw: any): any => {
     if (raw === undefined || raw === null) {
@@ -586,42 +640,29 @@ export const predictMovement = async (
     // TRY ML SERVICE DIRECTLY FIRST
     if (mlUrl) {
         try {
-            const mlPayload = {
-                animal,
-                trajectory: recentPath,
-                steps: kFuture
-            };
-            
-            logger.info(`[ML] Requesting prediction from ML API: ${mlUrl}/predict`);
+            const mlPayload = { animal, trajectory: recentPath, steps: kFuture };
+            logger.info(`[ML] Requesting prediction from ML API: ${String(mlUrl).replace(/\/+$/, '')}/predict`);
             logger.debug(`[ML] Payload: ${JSON.stringify(mlPayload)}`);
 
-            const mlResponse = await nativeFetch(`${mlUrl}/predict`, {
-                method: 'POST',
-                body: JSON.stringify(mlPayload)
-            }, 5, 5000);
-
-            console.log("API Response:", mlResponse);
-            const positions = mlResponse?.predicted_positions || mlResponse?.path;
-            if (mlResponse && !mlResponse.error && Array.isArray(positions) && positions.length > 0) {
+            const mlResult = await mlPredict(mlUrl, mlPayload);
+            if (!mlResult.error && Array.isArray(mlResult.path) && mlResult.path.length > 0) {
                 logger.info("[ML] Direct ML prediction successful");
-                // Transform to unified format
-                let path = positions.map((p: any) => ({
-                    lat: Number(p.lat || p[0]),
-                    lon: Number(p.lon || p[1]),
-                    address: 'Wildlife corridor'
+                let path = mlResult.path.map((p: any) => ({
+                    lat: Number(p?.lat),
+                    lon: Number(p?.lon),
+                    address: String(p?.address || 'Wildlife corridor'),
                 }));
-                // Try to get real addresses
                 try {
                     const names = await Promise.all(path.map((p: any) => reverseGeocode(p.lat, p.lon)));
-                    path = path.map((p: any, i: number) => ({ ...p, address: String(names[i] || 'Wildlife corridor') }));
+                    path = path.map((p: any, i: number) => ({ ...p, address: String(names[i] || p.address || 'Wildlife corridor') }));
                 } catch {}
 
                 return {
                     animal,
                     path,
-                    risk_level: mlResponse.risk_level || "Medium",
-                    safety_override: !!mlResponse.safety_override,
-                    status: 'ok'
+                    risk_level: String((mlResult.raw as any)?.risk_level || "Medium"),
+                    safety_override: !!(mlResult.raw as any)?.safety_override,
+                    status: 'ok',
                 } as any;
             }
         } catch (e) {
