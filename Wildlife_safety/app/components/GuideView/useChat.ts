@@ -9,7 +9,8 @@ import {
   fetchRecentWildlife,
   findSafePlacesNear,
   getAIGuideResponse,
-  predictRouteRisk
+  predictRouteRisk,
+  getWeatherData
 } from '../../services/apiService';
 import { ANIMALS } from '../../constants';
 import Constants from 'expo-constants';
@@ -181,7 +182,7 @@ export const useChat = (
                 const [riskInfo, ar, weatherData] = await Promise.all([
                   predictRouteRisk(route.path),
                   getAnimalsNearRoute(route.path),
-                  searchLocations(dest).then(locs => locs[0] ? api.getWeatherData(locs[0].lat, locs[0].lon) : null)
+                  searchLocations(dest).then(locs => locs[0] ? getWeatherData(locs[0].lat, locs[0].lon) : null)
                 ]);
                 
                 console.log("API Response:", riskInfo);
