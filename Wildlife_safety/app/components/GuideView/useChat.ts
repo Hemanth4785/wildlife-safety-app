@@ -178,9 +178,13 @@ export const useChat = (
                 { lat: d.lat, lon: d.lon, name: d.name }
               );
               if (route?.path?.length) {
-                const riskInfo = await predictRouteRisk(route.path);
+                const [riskInfo, ar, weatherData] = await Promise.all([
+                  predictRouteRisk(route.path),
+                  getAnimalsNearRoute(route.path),
+                  searchLocations(dest).then(locs => locs[0] ? api.getWeatherData(locs[0].lat, locs[0].lon) : null)
+                ]);
+                
                 console.log("API Response:", riskInfo);
-                const ar = await getAnimalsNearRoute(route.path);
                 console.log("API Response:", ar);
                 if (!ar) {
                   addMessage('model', "Route risk data is currently unavailable. Please try again.");
@@ -209,7 +213,10 @@ export const useChat = (
                 const riskLevel = riskInfo?.routeRisk || 'Medium';
                 const recommendedPath = sOrigin === 'Mudumalai' && sDest === 'Ooty' ? "Mudumalai → Masinagudi → Ooty" : "Direct route recommended";
                 const tips = getSpeciesTips(cleanAnimals).join(';');
-                const structuredMsg = `__ROUTE_SAFE__|${sOrigin}|${sDest}|${riskLevel}|${animalsStr}|${recommendedPath}|${tips}`;
+                
+                const weatherStr = weatherData ? `${Math.round(weatherData.temperature)}°C, ${weatherData.windSpeed}km/h wind` : 'N/A';
+                
+                const structuredMsg = `__ROUTE_SAFE__|${sOrigin}|${sDest}|${riskLevel}|${animalsStr}|${recommendedPath}|${tips}|${weatherStr}`;
                 addMessage('model', structuredMsg);
                 addMessage('model', `__ROUTE_LINK__|${o.name}|${d.name}`);
                 setStartLocation(null);

@@ -31,7 +31,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, onOpenRouteLi
         );
     }
 
-    // Handle Structured Route Safe Format: __ROUTE_SAFE__|origin|dest|risk|animals|path|tips
+    // Handle Structured Route Safe Format: __ROUTE_SAFE__|origin|dest|risk|animals|path|tips|weather
     if (role === 'model' && typeof text === 'string' && text.startsWith('__ROUTE_SAFE__|')) {
         const parts = text.split('|');
         const origin = parts[1] || '';
@@ -40,6 +40,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, onOpenRouteLi
         const animals = parts[4] || 'None';
         const path = parts[5] || '';
         const tips = (parts[6] || '').split(';');
+        const weather = parts[7] || 'N/A';
 
         const riskColor = risk.toUpperCase() === 'HIGH' ? '#ef4444' : risk.toUpperCase() === 'MEDIUM' ? '#f59e0b' : '#10b981';
 
@@ -54,6 +55,11 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, onOpenRouteLi
 
                 <View style={[styles.riskBadge, { backgroundColor: riskColor + '20', borderColor: riskColor }]}>
                     <Text style={[styles.riskLabel, { color: riskColor }]}>⚠ Risk Level: {risk}</Text>
+                </View>
+
+                <View style={styles.cardSection}>
+                    <Text style={styles.label}>🌦 Destination Weather</Text>
+                    <Text style={styles.value}>{weather}</Text>
                 </View>
 
                 <View style={styles.cardSection}>
