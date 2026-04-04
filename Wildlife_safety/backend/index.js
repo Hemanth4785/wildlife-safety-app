@@ -1777,20 +1777,36 @@ app.post('/api/predict-movement', async (req, res) => {
         
         const mlPayload = { trajectory, animal, steps: kFuture };
 
+        let mlHint = null;
         try {
             const mlResult = await predictMovementML(mlPayload);
-
-            if (mlResult.status === 'success' && Array.isArray(mlResult.predictions)) {
-                predictedPositions = mlResult.predictions.map(p => corridorClamp(p.lat, p.lon));
+            const preds = mlResult && Array.isArray(mlResult.predictions) ? mlResult.predictions : [];
+            const st = mlResult && mlResult.status != null ? String(mlResult.status).toLowerCase() : '';
+            if (preds.length > 0 && (st === 'success' || st === '' || !mlResult.error)) {
+                predictedPositions = preds.map(p => corridorClamp(Number(p.lat), Number(p.lon)))
+                    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon));
                 modelUsed = mlResult.model_used || 'LSTM-Service';
                 habitatScore = Number(mlResult.suitability ?? 0.5);
-                console.log(`[ML] Received movement predictions from ML service`);
+                console.log(`[ML] Received ${predictedPositions.length} movement predictions from ML service`);
             } else {
-                throw new Error(mlResult.error || "ML service movement prediction failed");
+                mlHint = mlResult?.error || mlResult?.message || mlResult?.detail || 'ML service returned no predictions';
+                console.warn('[ML]', mlHint);
             }
         } catch (err) {
+            mlHint = err.message;
             console.error("[ML] Movement prediction failed:", err.message);
-            return res.status(500).json({ status: 'failed', error: 'ML movement prediction failed' });
+        }
+
+        if (predictedPositions.length === 0) {
+            return res.status(200).json({
+                status: 'no_prediction',
+                predicted_locations: [],
+                predicted_positions: [],
+                model_used: 'none',
+                risk_level: 'Medium',
+                habitat_suitability: habitatScore,
+                message: mlHint || 'Movement prediction unavailable',
+            });
         }
 
         // FEATURE FUSION: Combine LSTM path and MaxEnt suitability for Random Forest

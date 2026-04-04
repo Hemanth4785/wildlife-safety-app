@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, Dimensions, Platform, Image, ActivityIndicator, Modal, TouchableOpacity, TextInput, ScrollView, Alert, Pressable, unstable_batchedUpdates, Animated } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, UrlTile, type Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, Circle, PROVIDER_GOOGLE, Callout, type Region } from 'react-native-maps';
 import type { AnimalPrediction, Location, Route, NavigationStats, NavigationAlert, SafePlace, TravelMode, Report } from '../types';
 import { AppState, UIMode } from '../types';
 import { MAP_CENTER, MAP_ZOOM, ANIMATION_STEPS, ANIMALS, canonicalScientific } from '../constants';
@@ -15,7 +15,7 @@ import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistance
 import PredictionPanel from './PredictionPanel';
 import { useAppContext } from '../contexts/AppContext';
 import { stableRoutePathKey, stableJsonKey } from '../utils/stableKeys';
-import { safeArray, safeObject } from '../utils/safety';
+import { safeArray } from '../utils/safety';
 
 const easeInOutSine = (x: number): number => -(Math.cos(Math.PI * x) - 1) / 2;
 
@@ -25,6 +25,37 @@ const DUMMY_COORDINATES_2 = [
 ];
 
 const BOTTOM_TAB_HEIGHT = 80;
+
+/** Shown when live API data is empty so the map always has at least one marker for demos. */
+const FALLBACK_REPORTS: Report[] = [
+    {
+        id: 'demo-report-1',
+        wildlifeType: 'Elephant',
+        location: 'Chennai (demo)',
+        description: 'Demo observation when offline or no API data',
+        timestamp: new Date().toISOString(),
+        lat: 13.0827,
+        lon: 80.2707,
+    },
+];
+
+const FALLBACK_SAFE_PLACES: SafePlace[] = [
+    {
+        id: 900001,
+        lat: 13.08,
+        lon: 80.27,
+        type: 'ranger',
+        name: 'Safe Zone (demo)',
+    },
+];
+
+const FALLBACK_WILDLIFE_SIGHTING = {
+    id: 'demo-sighting-1',
+    scientificName: 'Elephas maximus',
+    scientific_name: 'Elephas maximus',
+    lat: 13.0827,
+    lon: 80.2707,
+};
 
 const PREDICTION_POINT_SLOTS = 3;
 
@@ -317,7 +348,6 @@ interface MapViewProps {
 const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const context = useAppContext();
     const insets = useSafeAreaInsets();
-    console.log("Reports on map:", props.reports);
     let tabBarHeight = 0;
     try {
         tabBarHeight = useBottomTabBarHeight();
@@ -332,13 +362,13 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     const { 
         userLocation = context.userLocation, 
-        predictions = context.predictions, 
+        predictions: predictionsIn = context.predictions, 
         animationProgress = 0, 
         nearbyRadiusKm = context.user?.nearbyRadiusKm || 5, 
         safeRoute = context.safeRoute, 
-        safePlaces = context.safePlaces, 
-        riskZones = context.riskZones, 
-        riskySegments = context.riskySegments, 
+        safePlaces: safePlacesIn = context.safePlaces, 
+        riskZones: riskZonesIn = context.riskZones, 
+        riskySegments: riskySegmentsIn = context.riskySegments, 
         isNavigating = context.isNavigating, 
         liveLocation = context.liveLocation, 
         navigationStats = context.navigationStats, 
@@ -360,12 +390,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         onClearSuggestions = context.clearSuggestions, 
         searchError = context.searchError, 
         getCurrentLocation = context.getCurrentLocation,
-        recentSightings = context.recentSightings, 
+        recentSightings: recentSightingsIn = context.recentSightings, 
         isWildlifeLoading = context.isWildlifeLoading, 
         isLocationLoading = context.isLocationLoading, 
         isRouteLoading = context.isRouteLoading,
-        reports = [],
-        visibleAnimals = context.visibleAnimals, 
+        reports: reportsIn = context.reports,
+        visibleAnimals: visibleAnimalsIn = context.visibleAnimals, 
         setVisibleAnimals = context.setVisibleAnimals,
         showPredictions = context.showPredictions, 
         setShowPredictions = context.setShowPredictions,
@@ -378,6 +408,17 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         historicalDateRange = context.historicalDateRange, 
         setHistoricalDateRange = context.setHistoricalDateRange
     } = props;
+
+    const predictions = Array.isArray(predictionsIn) ? predictionsIn : [];
+    const safePlaces = Array.isArray(safePlacesIn) ? safePlacesIn : [];
+    const riskZones = Array.isArray(riskZonesIn) ? riskZonesIn : [];
+    const riskySegments = Array.isArray(riskySegmentsIn) ? riskySegmentsIn : [];
+    const recentSightings = Array.isArray(recentSightingsIn) ? recentSightingsIn : [];
+    const visibleAnimals =
+        visibleAnimalsIn && typeof visibleAnimalsIn === 'object' ? visibleAnimalsIn : {};
+    const reports = Array.isArray(reportsIn) ? reportsIn : [];
+
+    console.log('Reports:', reports);
 
     const routePathKey = stableRoutePathKey(safeRoute?.path as [number, number][] | undefined);
     const hasRoute = Boolean(routePathKey);
@@ -584,10 +625,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     const [routeColor, setRouteColor] = useState<string>('#16a34a');
     const [showRiskAlert, setShowRiskAlert] = useState<boolean>(false);
 
-    useEffect(() => {
-        console.log("DEBUG:", ANIMALS);
-    }, []);
-    const animalTypes = useMemo(() => Object.keys(safeObject<any>(ANIMALS)), []);
+    const animalTypes = useMemo(() => Object.keys(ANIMALS || {}), []);
 
     const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
 
@@ -603,11 +641,34 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
         }
     };
 
+    const showFallbackDemo = useMemo(() => {
+        if (isWildlifeLoading) return false;
+        const hasReports = reports.some(
+            (r) => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))
+        );
+        const hasPlaces = safePlaces.some(
+            (p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon))
+        );
+        const hasSightings = recentSightings.some(
+            (s) => s && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lon))
+        );
+        const hasRisk = riskZones.length > 0;
+        return !hasReports && !hasPlaces && !hasSightings && !hasRisk;
+    }, [reportsKey, safePlacesKey, recentSightingsKey, riskZonesKey, isWildlifeLoading, reports, safePlaces, recentSightings, riskZones]);
+
+    const safePlacesWithFallback = useMemo(() => {
+        const valid = safePlaces.filter(
+            (p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon))
+        );
+        if (valid.length > 0) return safePlaces;
+        if (showFallbackDemo) return FALLBACK_SAFE_PLACES;
+        return [];
+    }, [safePlaces, showFallbackDemo, safePlacesKey]);
+
     const processedSafePlaces = useMemo(() => {
-        if (!Array.isArray(safePlaces) || safePlaces.length === 0) return [];
-        // Always show valid safe places; along-route queries are already filtered in the service layer
-        return safePlaces.filter(p => p && p.lat && p.lon);
-    }, [safePlacesKey, routePathKey]);
+        if (!Array.isArray(safePlacesWithFallback) || safePlacesWithFallback.length === 0) return [];
+        return safePlacesWithFallback.filter((p) => p && p.lat && p.lon);
+    }, [safePlacesWithFallback, routePathKey, safePlacesKey]);
 
     const safePredictedPath = useMemo(() => {
         if (!Array.isArray(predictedPath)) return [];
@@ -699,7 +760,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 3,
                 wildlifeBase
             );
-            console.log("API Response:", result);
+            console.log("ML API Response:", result);
             console.log('[Movement] RN api_response:', JSON.stringify({ status: (result as any)?.status, path_len: (result as any)?.path?.length }));
             
             const path = Array.isArray(result?.path) ? result.path : [];
@@ -710,6 +771,40 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 setPredictionModel((result as any)?.model_used || 'simulation');
                 setUiMode(UIMode.PREDICTION);
             } else {
+                // If no movement path, try risk endpoint explicitly (different response type)
+                try {
+                    const dKm = Number.isFinite(Number(result?.distance_to_user_km))
+                        ? Number(result?.distance_to_user_km)
+                        : calculateMinDistanceToPolyline(
+                            { lat: userLoc.lat, lon: userLoc.lon },
+                            [[wildlifeBase.lat, wildlifeBase.lon]]
+                        );
+                    const riskRes = await api.predictRisk({
+                        animal: animalName,
+                        latitude: wildlifeBase.lat,
+                        longitude: wildlifeBase.lon,
+                        distance_km: dKm,
+                        sighting_date: new Date().toISOString(),
+                    } as any);
+                    console.log("ML API Response:", riskRes);
+
+                    if (riskRes && !riskRes.error && riskRes.risk) {
+                        const risk = String(riskRes.risk).toUpperCase();
+                        const prob = typeof riskRes.probability === 'number' ? riskRes.probability : null;
+                        const extra = [
+                            prob !== null ? `Probability: ${(prob * 100).toFixed(0)}%` : null,
+                        ].filter(Boolean).join('\n');
+
+                        Alert.alert(
+                            '⚠️ High wildlife risk detected',
+                            `${risk}${extra ? `\n\n${extra}` : ''}`
+                        );
+                        return;
+                    }
+                } catch (e) {
+                    // ignore risk fallback failures; degrade handling below
+                }
+
                 console.log('[Movement] No valid path returned or backend error.', result?.message);
                 if ((result as any)?.degraded) {
                     Alert.alert('Prediction Unavailable', result?.message || 'The prediction engine is currently busy. Please try again in a few moments.');
@@ -840,9 +935,26 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     // Flatten data for markers to ensure stable keys and no undefined access
     const reportMarkers = useMemo(() => {
-        if (!Array.isArray(reports)) return [];
-        return reports.filter(r => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon)));
-    }, [reportsKey]);
+        const base = reports.filter(
+            (r) => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))
+        );
+        if (base.length > 0) return base;
+        if (showFallbackDemo) {
+            return FALLBACK_REPORTS.filter(
+                (r) => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))
+            );
+        }
+        return [];
+    }, [reportsKey, reports, showFallbackDemo]);
+
+    const recentSightingsForMap = useMemo(() => {
+        const valid = recentSightings.filter(
+            (s) => s && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lon))
+        );
+        if (valid.length > 0) return recentSightings;
+        if (showFallbackDemo) return [FALLBACK_WILDLIFE_SIGHTING];
+        return recentSightings;
+    }, [recentSightingsKey, recentSightings, showFallbackDemo]);
     
     useEffect(() => {
         if (processedSafePlaces && processedSafePlaces.length > 0) {
@@ -852,18 +964,21 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     useEffect(() => {
         if (uiMode === UIMode.MAP && !showAnimalMarkers) {
-            if ((Array.isArray(recentSightings) && recentSightings.length > 0) || (Array.isArray(riskZones) && riskZones.length > 0)) {
+            if (
+                (Array.isArray(recentSightingsForMap) && recentSightingsForMap.length > 0) ||
+                (Array.isArray(riskZones) && riskZones.length > 0)
+            ) {
                 setShowAnimalMarkersRef.current?.(true);
             }
         }
-    }, [uiMode, showAnimalMarkers, recentSightingsKey, riskZonesKey]);
+    }, [uiMode, showAnimalMarkers, recentSightingsKey, riskZonesKey, recentSightingsForMap]);
 
     // NEW: Conditional marker logic based on route activity
     const animalMarkers = useMemo(() => {
         if (!showAnimalMarkers) return [];
 
         // Combine recent sightings and risk zones to ensure all relevant animals are visible
-        const combined = [...(recentSightings || [])];
+        const combined = [...(recentSightingsForMap || [])];
         if (Array.isArray(riskZones)) {
             riskZones.forEach(zone => {
                 if (!zone) return;
@@ -893,7 +1008,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             
             return true;
         });
-    }, [showAnimalMarkers, routePathKey, recentSightingsKey, riskZonesKey, visibleAnimalsKey]);
+    }, [showAnimalMarkers, routePathKey, recentSightingsKey, riskZonesKey, visibleAnimalsKey, recentSightingsForMap]);
     
     // 🔎 STEP 1 – LOG RAW DATA
     const isRouteActive = !!(safeRoute?.path && safeRoute.path.length > 0);
@@ -913,39 +1028,24 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 <MapView
                     ref={mapRef}
                     key={initialMapKey.current}
-                    provider={null}
+                    provider={PROVIDER_GOOGLE}
                     style={styles.map}
                     initialRegion={initialRegion}
                     showsUserLocation={true}
                     followsUserLocation={isNavigating}
                     showsMyLocationButton={true}
                     onMapReady={() => {
-                        console.log('[MapView] OpenStreetMap Engine successfully loaded.');
+                        console.log('[MapView] Google Maps loaded.');
                     }}
                     onRegionChangeComplete={(region: Region) => {
                         console.log(`[MapView] Viewport updated: lat=${region.latitude}, lon=${region.longitude}, zoomLevel=${Math.log2(360 / region.longitudeDelta)}`);
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta });
                     }}
                 >
-                    {(() => {
-                        const tileUrl =
-                            (typeof (CONFIG as any)?.OSM_TILE_URL === 'string' && (CONFIG as any).OSM_TILE_URL) ||
-                            "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-                        if (!tileUrl) return null;
-                        return (
-                            <UrlTile
-                                urlTemplate={tileUrl}
-                                maximumZ={19}
-                                flipY={false}
-                                shouldReplaceMapContent={true}
-                                zIndex={-1}
-                            />
-                        );
-                    })()}
                     {/* 1. RISK CIRCLES (Bottom Layer) */}
-                    {(Array.isArray(riskZones) ? riskZones : []).map((zone) => (
+                    {(Array.isArray(riskZones) ? riskZones : []).map((zone, index) => (
                         <Circle
-                            key={`risk-circle-${zone.id || `${zone.lat}-${zone.lon}`}`}
+                            key={`risk-circle-${zone?.id ?? 'z'}-${index}-${Number(zone?.lat)}-${Number(zone?.lon)}`}
                             center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
                             radius={2000}
                             fillColor="rgba(255, 0, 0, 0.12)"
@@ -1131,8 +1231,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         let emoji = '🐾';
                         const name = r.wildlifeType || r.ai?.common;
                         if (name) {
-                             console.log("DEBUG:", ANIMALS);
-                             const entry = safeArray<any>(Object.values(safeObject<any>(ANIMALS))).find(a => a?.common === name);
+                             const entry = safeArray<any>(Object.values(ANIMALS || {})).find(a => a?.common === name);
                              if (entry) emoji = entry.emoji;
                         }
                         return (
@@ -1241,9 +1340,22 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                 </MapView>
 
                 {/* NO WILDLIFE INDICATOR */}
-                {!isWildlifeLoading && animalMarkers.length === 0 && reportMarkers.length === 0 && uiMode === UIMode.MAP && !safeRoute && (
-                    <View style={styles.noWildlifeContainer}>
-                        <Text style={styles.noWildlifeText}>No wildlife sightings in this area</Text>
+                {!showFallbackDemo &&
+                    !isWildlifeLoading &&
+                    animalMarkers.length === 0 &&
+                    reportMarkers.length === 0 &&
+                    uiMode === UIMode.MAP &&
+                    !safeRoute && (
+                        <View style={styles.noWildlifeContainer}>
+                            <Text style={styles.noWildlifeText}>No wildlife sightings in this area</Text>
+                        </View>
+                    )}
+
+                {showFallbackDemo && (
+                    <View style={styles.demoDataBanner}>
+                        <Text style={styles.demoDataBannerText}>
+                            Demo markers — connect for live wildlife and safe places
+                        </Text>
                     </View>
                 )}
 
@@ -1993,6 +2105,24 @@ const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.8)',
         fontSize: 11,
         marginTop: 2,
+    },
+    demoDataBanner: {
+        position: 'absolute',
+        top: 56,
+        left: 16,
+        right: 16,
+        backgroundColor: 'rgba(5, 150, 105, 0.92)',
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        zIndex: 99,
+        elevation: 3,
+    },
+    demoDataBannerText: {
+        color: '#ffffff',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     filterSubLabel: {
         fontSize: 12,

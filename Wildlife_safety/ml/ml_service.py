@@ -336,7 +336,12 @@ async def predict_risk(req: RiskRequest):
 @app.post("/predict-movement", response_model=MovementResponse)
 async def predict_movement(req: MovementRequest):
     if assets["status"] != "ready":
-        raise HTTPException(status_code=503, detail="Models are still loading.")
+        return MovementResponse(
+            status="no_prediction",
+            model_used="loading",
+            predictions=[],
+            suitability=0.5,
+        )
     try:
         if DEBUG_MODE:
             logger.info(f"Movement prediction requested: {req.json()}")
@@ -389,7 +394,12 @@ async def predict_movement(req: MovementRequest):
         )
     except Exception as e:
         logger.exception("Movement prediction failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        return MovementResponse(
+            status="no_prediction",
+            model_used="error-fallback",
+            predictions=[],
+            suitability=0.5,
+        )
 
 if __name__ == "__main__":
     import uvicorn

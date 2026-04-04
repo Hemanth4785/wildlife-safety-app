@@ -67,8 +67,12 @@
       "GEMINI_API_KEY": "",
       "GEMINI_MODEL": "gemini-1.5-flash",
       "eas": {
-        "projectId": "0e8e4b8e-8bab-464b-ba65-c7afe6ad43c2"
-      }
-    }
+        "projectId": "2eff998a-4ea6-476e-a02a-5702bf0d01e1"
+      },
+      "NODE_ENV": "development",
+      "API_BASE_URL": "https://wildlife-safety-api.onrender.com/api",
+      "ML_SERVICE_URL": "https://wildlife-safety-app-1.onrender.com"
+    },
+    "owner": "hemanth977"
   }
 }

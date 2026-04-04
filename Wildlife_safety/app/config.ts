@@ -37,4 +37,6 @@ export const CONFIG = {
     GEMINI_API_KEY: getExtra('GEMINI_API_KEY'),
     GEMINI_MODEL: getExtra('GEMINI_MODEL', 'gemini-1.5-flash'),
     WEATHER_API_KEY: getExtra('WEATHER_API_KEY', '0f965eb13fcac3cab46a6d13af345eac'),
+    /** Optional OSM-style raster URL; must include {z}, {x}, {y}. See MapView.native UrlTile. */
+    tileUrl: getExtra('TILE_URL') || getExtra('OSM_TILE_URL') || '',
 };

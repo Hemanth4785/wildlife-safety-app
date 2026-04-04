@@ -332,7 +332,7 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
                 return null;
             }
 
-            const route = await api.getRoute(startLoc, endLoc);
+            const route = await api.getRoute(startLoc, endLoc, mode);
             if (route) {
                 setSafeRoute(route);
                 

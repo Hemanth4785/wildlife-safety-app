@@ -1,6 +1,6 @@
 import type { Sighting, Location, ChatMessage, Route, WeatherData, SafePlace, TravelMode } from '../types';
 import { logger } from '../utils/logger';
-import { API_BASE_URL, ML_SERVICE_URL, CONFIG } from '../config';
+import { getApiBaseUrl as resolveApiBaseUrl, ML_SERVICE_URL, CONFIG } from '../config';
 import { ANIMALS, canonicalScientific, isWithinSouthIndia, SOUTH_INDIA_BOUNDS } from '../constants';
 import wildlifeRecent from '../wildlife_recent.json';
 import { calculateMinDistanceToPolyline } from './geoService';
@@ -10,15 +10,14 @@ import { safeObject } from '../utils/safety';
 let wildlifeAllCache: any[] | null = null;
 let wildlifeAllCacheAt = 0;
 
-// Helper to get API Base URL
+// Use config normalization so base always ends with /api (matches Express routes like /api/search-locations).
 const getApiBaseUrl = (): string | null => {
-    const url = API_BASE_URL;
-    // Log the URL at startup for debugging
+    const url = resolveApiBaseUrl();
     console.log(`[API] Using API Base URL: ${url}`);
     if (!url) {
         logger.warn('[API] API_BASE_URL is missing!');
     }
-    return url;
+    return url || null;
 };
 
 // Helper to get ML Service URL
@@ -65,9 +64,9 @@ type MlPredictResult = {
     message?: string;
 };
 
-const mlPredict = async (mlUrl: string, payload: any): Promise<MlPredictResult> => {
+const mlPredictMovement = async (mlUrl: string, payload: any): Promise<MlPredictResult> => {
     try {
-        const endpoint = `${String(mlUrl).replace(/\/+$/, '')}/predict`;
+        const endpoint = `${String(mlUrl).replace(/\/+$/, '')}/predict-movement`;
         const body = safeObject(payload);
         const res = await fetchWithTimeout(endpoint, {
             method: 'POST',
@@ -93,9 +92,9 @@ const mlPredict = async (mlUrl: string, payload: any): Promise<MlPredictResult> 
         }
 
         const raw = data || {};
-        const positions = Array.isArray(raw?.predicted_positions)
-            ? raw.predicted_positions
-            : (Array.isArray(raw?.path) ? raw.path : []);
+        const positions =
+            Array.isArray(raw?.path) ? raw.path :
+            (Array.isArray(raw?.predicted_positions) ? raw.predicted_positions : []);
 
         const path = Array.isArray(positions)
             ? positions.map((p: any) => ({
@@ -109,6 +108,55 @@ const mlPredict = async (mlUrl: string, payload: any): Promise<MlPredictResult> 
     } catch (e: any) {
         logger.warn('[ML] predict failed', e);
         return { path: [], raw: {}, error: true, message: 'Prediction failed' };
+    }
+};
+
+type MlRiskResult = {
+    risk: string | null;
+    probability: number | null;
+    raw: any;
+    error?: boolean;
+    message?: string;
+};
+
+export const predictRisk = async (payload: {
+    animal: string;
+    latitude: number;
+    longitude: number;
+    distance_km?: number;
+    sighting_date?: string;
+}): Promise<MlRiskResult> => {
+    const mlUrl = getMlServiceUrl();
+    if (!mlUrl) return { risk: null, probability: null, raw: {}, error: true, message: 'ML service not configured' };
+
+    try {
+        const endpoint = `${String(mlUrl).replace(/\/+$/, '')}/predict-risk`;
+        const body = safeObject(payload);
+        const res = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
+        } as any, 20000);
+
+        let data: any = null;
+        try {
+            data = await (res as any).json();
+        } catch {
+            data = null;
+        }
+        console.log("ML API Response:", data);
+
+        if (!res.ok) {
+            return { risk: null, probability: null, raw: data || {}, error: true, message: `Risk prediction failed (HTTP ${res.status})` };
+        }
+
+        const raw = data || {};
+        const risk = typeof raw?.risk === 'string' ? String(raw.risk) : null;
+        const probability = Number.isFinite(raw?.probability) ? Number(raw.probability) : null;
+        return { risk, probability, raw };
+    } catch (e: any) {
+        logger.warn('[ML] predictRisk failed', e);
+        return { risk: null, probability: null, raw: {}, error: true, message: 'Risk prediction failed' };
     }
 };
 
@@ -527,7 +575,7 @@ export const reverseGeocode = async (lat: number, lon: number): Promise<string> 
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return 'Unknown forest area';
 
-    const url = `${baseUrl}/api/reverse-geocode?lat=${lat}&lon=${lon}`;
+    const url = `${baseUrl}/reverse-geocode?lat=${lat}&lon=${lon}`;
     try {
         const response = await nativeFetch(url);
         // Requirement: Treat all errors as success, fallback to safe string
@@ -616,6 +664,8 @@ export const predictMovement = async (
     animal: string, 
     path: { lat: number, lon: number, address: string }[], 
     risk_level: string, 
+    risk?: string,
+    probability?: number,
     safety_override: boolean,
     distance_to_user_km?: number,
     status?: string,
@@ -630,6 +680,8 @@ export const predictMovement = async (
         animal,
         path: [],
         risk_level: "Medium",
+        risk: undefined as any,
+        probability: undefined as any,
         safety_override: false,
         distance_to_user_km: 0,
         status: 'degraded',
@@ -641,10 +693,10 @@ export const predictMovement = async (
     if (mlUrl) {
         try {
             const mlPayload = { animal, trajectory: recentPath, steps: kFuture };
-            logger.info(`[ML] Requesting prediction from ML API: ${String(mlUrl).replace(/\/+$/, '')}/predict`);
+            logger.info(`[ML] Requesting movement prediction from ML API: ${String(mlUrl).replace(/\/+$/, '')}/predict-movement`);
             logger.debug(`[ML] Payload: ${JSON.stringify(mlPayload)}`);
 
-            const mlResult = await mlPredict(mlUrl, mlPayload);
+            const mlResult = await mlPredictMovement(mlUrl, mlPayload);
             if (!mlResult.error && Array.isArray(mlResult.path) && mlResult.path.length > 0) {
                 logger.info("[ML] Direct ML prediction successful");
                 let path = mlResult.path.map((p: any) => ({
@@ -661,6 +713,8 @@ export const predictMovement = async (
                     animal,
                     path,
                     risk_level: String((mlResult.raw as any)?.risk_level || "Medium"),
+                    risk: typeof (mlResult.raw as any)?.risk === 'string' ? String((mlResult.raw as any).risk) : undefined,
+                    probability: Number.isFinite((mlResult.raw as any)?.probability) ? Number((mlResult.raw as any).probability) : undefined,
                     safety_override: !!(mlResult.raw as any)?.safety_override,
                     status: 'ok',
                 } as any;
@@ -671,7 +725,7 @@ export const predictMovement = async (
     }
 
     if (!baseUrl) return safeDefault;
-    const url = `${baseUrl}/api/predict-movement`;
+    const url = `${baseUrl}/predict-movement`;
 
     try {
         logger.info(`[API] Requesting movement prediction from backend: ${url}`);
@@ -691,6 +745,14 @@ export const predictMovement = async (
             return safeDefault;
         }
 
+        if (String((response as any)?.status || '').toLowerCase() === 'no_prediction') {
+            return {
+                ...safeDefault,
+                message: String((response as any)?.message || 'No movement prediction available'),
+                status: 'no_prediction',
+            };
+        }
+
         // Normalize backend formats...
         if (Array.isArray(response?.predicted_locations)) {
             const path = response.predicted_locations
@@ -701,10 +763,19 @@ export const predictMovement = async (
                     address: String(p.location || 'Unknown wildlife area')
                 }))
                 .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+            if (path.length === 0) {
+                return {
+                    ...safeDefault,
+                    message: 'No predicted path returned',
+                    status: 'no_prediction',
+                };
+            }
             return {
                 animal,
                 path,
                 risk_level: response.risk_level || "Medium",
+                risk: typeof response?.risk === 'string' ? String(response.risk) : undefined,
+                probability: Number.isFinite(response?.probability) ? Number(response.probability) : undefined,
                 safety_override: !!response.safety_override,
                 distance_to_user_km: response.distance_to_user_km,
                 status: 'ok',
@@ -723,6 +794,8 @@ export const predictMovement = async (
                 animal,
                 path,
                 risk_level: response.risk_level || "Medium",
+                risk: typeof response?.risk === 'string' ? String(response.risk) : undefined,
+                probability: Number.isFinite(response?.probability) ? Number(response.probability) : undefined,
                 safety_override: !!response.safety_override,
                 distance_to_user_km: response.distance_to_user_km,
                 status: 'ok',
@@ -789,7 +862,7 @@ Rules:
 - Be concise and local.
 - Avoid markdown (no asterisks, no bolding, no code fences) as it will not render correctly in the app. Use plain text formatting.`;
 
-        const data = await nativeFetch(`${baseUrl}/api/gemini/chat`, {
+        const data = await nativeFetch(`${baseUrl}/gemini/chat`, {
             method: 'POST',
             body: JSON.stringify({
                 history: (history || []).slice(-10), // Send last 10 messages for context
@@ -822,7 +895,7 @@ export const analyzeReportImage = async (image: { mimeType: string; data: string
         console.log("DEBUG:", ANIMALS);
         const species = Object.keys(safeObject<any>(ANIMALS));
         const prompt = `Identify the animal species in this photo from the allowed list only: ${species.join(', ')}.`;
-        const url = `${baseUrl}/api/gemini/analyze-image`;
+        const url = `${baseUrl}/gemini/analyze-image`;
         const parsed = await nativeFetch(url, {
             method: 'POST',
             body: JSON.stringify({ mimeType: image?.mimeType, data: image?.data, prompt })
@@ -933,6 +1006,18 @@ const processWildlifeList = async (list: any[]): Promise<any[]> => {
     }));
 };
 
+/** Normalize API body to an array (handles raw arrays or wrapped payloads). */
+function arrayFromApiPayload(data: any): any[] {
+    if (data == null) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.reports)) return data.reports;
+    if (Array.isArray(data?.wildlife)) return data.wildlife;
+    if (Array.isArray(data?.sightings)) return data.sightings;
+    if (Array.isArray(data?.items)) return data.items;
+    return [];
+}
+
 // --- TASK 3: Fetch Recent Wildlife from Backend ---
 export const fetchRecentWildlife = async (startDate?: string, endDate?: string): Promise<any[]> => {
     const baseUrl = getApiBaseUrl();
@@ -949,7 +1034,7 @@ export const fetchRecentWildlife = async (startDate?: string, endDate?: string):
     try {
         // High retry count for initial cold start fetch (5 retries, 8s backoff)
         const data = await nativeFetch(url, { method: 'GET' }, 5, 8000);
-        let list: any[] = (data && Array.isArray(data)) ? data : [];
+        let list: any[] = arrayFromApiPayload(data);
         
         // Only fallback if list is completely empty or fetch failed (and not in historical mode)
         if (!startDate && (list.length === 0 || data?.status === 'degraded' || data?.status === 'error' || data?.error)) {
@@ -1026,33 +1111,48 @@ export const fetchHistoricalPathPoints = async (
 export const getRoute = async (start: Location, end: Location, mode: TravelMode = 'car'): Promise<Route | null> => {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return null;
-    
-    // We still use the endpoint name 'osrm' but it now proxies to Google Maps Routes API
-    // Ensure we pass the 'mode' parameter correctly
+
     const url = `${baseUrl}/route/osrm?startLat=${start.lat}&startLon=${start.lon}&endLat=${end.lat}&endLon=${end.lon}&mode=${mode}`;
-    
+
     try {
         const response = await nativeFetch(url, { method: 'GET' }, 2, 5000);
-        
-        let path: [number, number][] = [];
-        if (response?.path && Array.isArray(response.path)) {
-            path = response.path.map((p: any) => [Number(p[0]), Number(p[1])] as [number, number]);
-        } else if (response?.routes?.[0]?.geometry) {
-             // If we had a polyline decoder, we'd use it here. 
-             // For now, assume the backend provides the 'path' field for native simplicity.
-             logger.warn("Route response missing simplified path field.");
+
+        if (!response || response.error === true || response.status === 'routing_failed') {
+            return null;
         }
 
-        if (path.length > 0) {
-            return {
-                id: `route-${Date.now()}`,
-                path,
-                distance: response.distance || response.routes?.[0]?.distance || 0,
-                duration: response.duration || response.routes?.[0]?.duration || 0,
-                mode
-            } as any;
+        let path: [number, number][] = [];
+
+        const lineCoords = response?.geometry?.coordinates;
+        if (Array.isArray(lineCoords) && lineCoords.length > 0) {
+            path = lineCoords.map(
+                (coord: number[]) => [Number(coord[1]), Number(coord[0])] as [number, number]
+            );
+        } else if (response?.path && Array.isArray(response.path)) {
+            path = response.path.map((p: any) => {
+                if (Array.isArray(p) && p.length >= 2) {
+                    return [Number(p[0]), Number(p[1])] as [number, number];
+                }
+                return [Number(p.lat), Number(p.lon)] as [number, number];
+            });
         }
-        return null;
+
+        if (path.length === 0) {
+            logger.warn('[getRoute] No geometry/path in OSRM response; cannot render polyline.');
+            return null;
+        }
+
+        const distanceMeters = Number(response.distance ?? 0);
+        const durationSeconds = Number(response.duration ?? 0);
+
+        return {
+            path,
+            distanceKm: distanceMeters / 1000,
+            durationMinutes: durationSeconds / 60,
+            start,
+            end,
+            mode,
+        };
     } catch (error) {
         logger.error("Failed to fetch route gracefully", error);
         return null;
@@ -1063,7 +1163,7 @@ export const getAnimalsNearRoute = async (routePath: [number, number][]): Promis
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return { riskZones: [], riskySegments: [] };
     
-    const url = `${baseUrl}/api/animals/near-route`;
+    const url = `${baseUrl}/animals/near-route`;
     
     // Convert [lat, lon] back to [lon, lat]
     const routeGeometry = routePath.map(p => [p[1], p[0]]);
@@ -1104,7 +1204,7 @@ export const predictAnimalPaths = async (
         return sightingSets.map((s) => ({ scientificName: s.scientificName, predictions: [] }));
     }
 
-    const endpoint = `${baseUrl}/api/predict-animal-paths`;
+    const endpoint = `${baseUrl}/predict-animal-paths`;
 
     try {
         const results = await Promise.all(
