@@ -232,6 +232,8 @@ class RiskRequest(BaseModel):
     human_population: Optional[float] = None
     elevation: Optional[float] = None
     habitat_suitability: Optional[float] = None
+    user_lat: Optional[float] = None
+    user_lon: Optional[float] = None
 
 class PredictionResponse(BaseModel):
     risk: str
@@ -291,6 +293,14 @@ async def predict_risk(req: RiskRequest):
             raise HTTPException(status_code=500, detail="Risk models not available")
         time_weight = calculate_time_weight(req.sighting_date)
         dwater, water_found = await get_distance_to_water_async(req.latitude, req.longitude)
+        
+        # Calculate distance_km if user coordinates are provided
+        from haversine import haversine as hs_dist, Unit
+        if req.user_lat is not None and req.user_lon is not None and req.latitude is not None and req.longitude is not None:
+            dist_km = hs_dist((req.user_lat, req.user_lon), (req.latitude, req.longitude), unit=Unit.KILOMETERS)
+        else:
+            dist_km = float(req.distance_km)
+
         suitability = req.habitat_suitability
         if suitability is None and req.latitude is not None and req.longitude is not None:
             suitability = calculate_suitability(req.animal, req.latitude, req.longitude)
@@ -310,7 +320,7 @@ async def predict_risk(req: RiskRequest):
             'distance_to_road': float(req.distance_to_road) if req.distance_to_road is not None else 1.0,
             'human_population': float(req.human_population) if req.human_population is not None else 100.0,
             'elevation': float(req.elevation) if req.elevation is not None else 500.0,
-            'distance_km': float(req.distance_km),
+            'distance_km': float(dist_km),
             'time_weight': float(time_weight),
             'habitat_suitability': float(suitability)
         }
@@ -325,7 +335,7 @@ async def predict_risk(req: RiskRequest):
         probs = model.predict_proba(features)[0]
         max_prob = float(np.max(probs))
         return PredictionResponse(
-            risk=str(risk_class).upper(), probability=round(max_prob, 2), distance_to_animal=round(req.distance_km, 2),
+            risk=str(risk_class).upper(), probability=round(max_prob, 2), distance_to_animal=round(dist_km, 2),
             distance_to_water=round(dwater, 2), water_found=water_found, time_weight=round(time_weight, 2),
             model_info=model_type, suitability=suitability
         )

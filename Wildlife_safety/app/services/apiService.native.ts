@@ -127,6 +127,8 @@ export const predictRisk = async (payload: {
     longitude: number;
     distance_km?: number;
     sighting_date?: string;
+    user_lat?: number;
+    user_lon?: number;
 }): Promise<MlRiskResult> => {
     const mlUrl = getMlServiceUrl();
     if (!mlUrl) return { risk: null, probability: null, raw: {}, error: true, message: 'ML service not configured' };
@@ -730,6 +732,8 @@ export const predictMovement = async (
                         animal,
                         latitude: rawPath[0].lat ?? rawPath[0][0],
                         longitude: rawPath[0].lon ?? rawPath[0][1],
+                        user_lat: userLocation.lat,
+                        user_lon: userLocation.lon,
                     };
                     const riskResult = await predictRisk(riskPayload as any);
                     if (riskResult && !riskResult.error) {
