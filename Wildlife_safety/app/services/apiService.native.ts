@@ -94,6 +94,7 @@ const mlPredictMovement = async (mlUrl: string, payload: any): Promise<MlPredict
         const raw = data || {};
         const positions =
             Array.isArray(raw?.path) ? raw.path :
+            Array.isArray(raw?.predictions) ? raw.predictions :
             (Array.isArray(raw?.predicted_positions) ? raw.predicted_positions : []);
 
         const path = Array.isArray(positions)
@@ -697,9 +698,18 @@ export const predictMovement = async (
             logger.debug(`[ML] Payload: ${JSON.stringify(mlPayload)}`);
 
             const mlResult = await mlPredictMovement(mlUrl, mlPayload);
-            if (!mlResult.error && Array.isArray(mlResult.path) && mlResult.path.length > 0) {
+            
+            const rawPath = Array.isArray(mlResult.path) && mlResult.path.length > 0 
+                ? mlResult.path 
+                : Array.isArray((mlResult.raw as any)?.predictions) && (mlResult.raw as any).predictions.length > 0 
+                    ? (mlResult.raw as any).predictions 
+                    : Array.isArray(mlResult.predictions) && (mlResult.predictions as any).length > 0 
+                        ? mlResult.predictions 
+                        : null;
+
+            if (!mlResult.error && rawPath) {
                 logger.info("[ML] Direct ML prediction successful");
-                let path = mlResult.path.map((p: any) => ({
+                let path = rawPath.map((p: any) => ({
                     lat: Number(p?.lat),
                     lon: Number(p?.lon),
                     address: String(p?.address || 'Wildlife corridor'),
