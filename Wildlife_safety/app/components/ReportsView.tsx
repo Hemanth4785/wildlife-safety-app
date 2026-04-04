@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import type { Report } from '../types';
 import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon, TrashIcon } from './icons';
 import * as ImagePicker from 'expo-image-picker';
-import { reverseGeocode, analyzeReportImage, searchLocations, deleteReport as deleteReportApi } from '../services/apiService';
+import { reverseGeocode, analyzeReportImage, searchLocations, deleteUserReport as deleteReportApi } from '../services/apiService';
 import { auth } from '../services/firebase';
 import { useAppContext } from '../contexts/AppContext';
 
