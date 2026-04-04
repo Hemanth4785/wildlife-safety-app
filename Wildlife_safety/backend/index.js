@@ -106,7 +106,7 @@ const predictRiskML = async (payload) => {
         };
 
         const response = await axios.post(`${ML_SERVICE_URL}/predict`, cleanPayload, { 
-            timeout: 10000,
+            timeout: 60000,
             headers: { 'Content-Type': 'application/json' }
         });
         return response.data;
@@ -120,7 +120,7 @@ const predictRiskML = async (payload) => {
             distance_to_water: 3.0,
             water_found: false,
             time_weight: 0.5,
-            status: 'failed', 
+            status: 'degraded', 
             error: error.message 
         };
     }
@@ -129,11 +129,11 @@ const predictRiskML = async (payload) => {
 // Helper to run ML movement predictions via HTTP
 const predictMovementML = async (payload) => {
     try {
-        const response = await axios.post(`${ML_SERVICE_URL}/predict-movement`, payload, { timeout: 10000 });
+        const response = await axios.post(`${ML_SERVICE_URL}/predict-movement`, payload, { timeout: 60000 });
         return response.data;
     } catch (error) {
         console.error("[ML-HTTP] Movement prediction failed:", error.message);
-        return { status: 'failed', error: error.message };
+        return { status: 'degraded', error: error.message };
     }
 };
 
@@ -1774,12 +1774,17 @@ app.post('/api/predict-movement', async (req, res) => {
 
         // --- EXCLUSIVE: FastAPI Service for Movement Prediction ---
         console.log(`[ML] Requesting movement prediction for ${animal} from FastAPI service`);
-        
-        const mlPayload = { trajectory, animal, steps: kFuture };
+
+        const mlPayload = {
+            animal: String(b.animal || 'Elephant'),
+            trajectory,
+            steps: kFuture,
+        };
 
         let mlHint = null;
+        let mlResult = null;
         try {
-            const mlResult = await predictMovementML(mlPayload);
+            mlResult = await predictMovementML(mlPayload);
             const preds = mlResult && Array.isArray(mlResult.predictions) ? mlResult.predictions : [];
             const st = mlResult && mlResult.status != null ? String(mlResult.status).toLowerCase() : '';
             if (preds.length > 0 && (st === 'success' || st === '' || !mlResult.error)) {
@@ -1799,13 +1804,14 @@ app.post('/api/predict-movement', async (req, res) => {
 
         if (predictedPositions.length === 0) {
             return res.status(200).json({
-                status: 'no_prediction',
-                predicted_locations: [],
-                predicted_positions: [],
-                model_used: 'none',
-                risk_level: 'Medium',
-                habitat_suitability: habitatScore,
-                message: mlHint || 'Movement prediction unavailable',
+                status: "degraded",
+                message: "Prediction engine temporarily unavailable",
+                risk: "Medium",
+                risk_level: "Medium",
+                probability: 0.5,
+                path: [],
+                degraded: true,
+                model_info: "Fallback"
             });
         }
 
@@ -1850,14 +1856,28 @@ app.post('/api/predict-movement', async (req, res) => {
             status: 'success',
             predicted_positions: predictedPositions,
             predicted_locations: predictedLocations,
+            path: predictedLocations, // Adding path for compatibility
             model_used: modelUsed,
+            model_info: rfResult.model_info || "RandomForest",
+            risk: riskLevel,
             risk_level: riskLevel,
-            habitat_suitability: habitatScore
+            probability: Number(rfResult.probability || 0.5),
+            habitat_suitability: habitatScore,
+            degraded: false
         });
 
     } catch (err) {
         console.error("[ML-API] Global Error:", err.message);
-        return res.status(500).json({ status: 'failed', error: err.message });
+        return res.status(200).json({
+            status: "degraded",
+            message: "Prediction engine temporarily unavailable",
+            risk: "Medium",
+            risk_level: "Medium",
+            probability: 0.5,
+            path: [],
+            degraded: true,
+            model_info: "Fallback"
+        });
     }
 });
 
