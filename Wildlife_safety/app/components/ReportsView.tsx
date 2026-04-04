@@ -73,7 +73,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
                             return;
                         } catch {
                             try {
-                                const res = await deleteReportApi(reportId);
+                                const res = await deleteReportApi(String(reportId));
                                 if (res && res.status === 'success') {
                                     const deletedId = res.deletedId || String(reportId);
                                     await removeReport(deletedId);
