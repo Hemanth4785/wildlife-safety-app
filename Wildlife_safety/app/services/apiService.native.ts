@@ -73,7 +73,7 @@ const mlPredictMovement = async (mlUrl: string, payload: any): Promise<MlPredict
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(body),
-        } as any, 20000);
+        } as any, 60000);
 
         let data: any = null;
         try {
@@ -138,7 +138,7 @@ export const predictRisk = async (payload: {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(body),
-        } as any, 20000);
+        } as any, 60000);
 
         let data: any = null;
         try {
