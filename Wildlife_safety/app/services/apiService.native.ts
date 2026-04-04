@@ -720,13 +720,35 @@ export const predictMovement = async (
                     path = path.map((p: any, i: number) => ({ ...p, address: String(names[i] || p.address || 'Wildlife corridor') }));
                 } catch {}
 
+                // Call Random Forest risk prediction using first predicted point
+                let riskLevel = "Medium";
+                let riskValue: string | undefined = undefined;
+                let probabilityValue: number | undefined = undefined;
+
+                try {
+                    const riskPayload = {
+                        animal,
+                        latitude: rawPath[0].lat ?? rawPath[0][0],
+                        longitude: rawPath[0].lon ?? rawPath[0][1],
+                    };
+                    const riskResult = await predictRisk(riskPayload as any);
+                    if (riskResult && !riskResult.error) {
+                        riskValue = typeof riskResult.risk === 'string' ? String(riskResult.risk) : undefined;
+                        riskLevel = String(riskResult.risk || 'Medium');
+                        probabilityValue = Number.isFinite(riskResult.probability) ? Number(riskResult.probability) : undefined;
+                        logger.info(`[ML] ✅ Random Forest risk result — risk: ${riskValue}, probability: ${probabilityValue}`);
+                    }
+                } catch (e) {
+                    logger.warn("[ML] Risk prediction failed, using default Medium", e);
+                }
+
                 return {
                     animal,
                     path,
-                    risk_level: String((mlResult.raw as any)?.risk_level || "Medium"),
-                    risk: typeof (mlResult.raw as any)?.risk === 'string' ? String((mlResult.raw as any).risk) : undefined,
-                    probability: Number.isFinite((mlResult.raw as any)?.probability) ? Number((mlResult.raw as any).probability) : undefined,
-                    safety_override: !!(mlResult.raw as any)?.safety_override,
+                    risk_level: riskLevel,
+                    risk: riskValue,
+                    probability: probabilityValue,
+                    safety_override: false,
                     status: 'ok',
                 } as any;
             }
