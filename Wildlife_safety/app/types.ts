@@ -46,6 +46,11 @@ export interface Route {
     mode: TravelMode;
     status?: 'success' | 'degraded' | 'failed';
     source?: string;
+    modes?: {
+        drive: string;
+        motorcycle: string;
+        walk: string;
+    };
 }
 
 export interface SafeRouteResponse {
