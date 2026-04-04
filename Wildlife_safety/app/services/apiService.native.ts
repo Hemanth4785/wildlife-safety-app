@@ -1182,6 +1182,9 @@ export const getRoute = async (start: Location, end: Location, mode: TravelMode 
         const distanceMeters = Number(response.distance ?? 0);
         const durationSeconds = Number(response.duration ?? 0);
 
+        // Capture multi-mode ETAs if available from OSRM
+        const modes = response?.modes || {};
+
         return {
             path,
             distanceKm: distanceMeters / 1000,
@@ -1189,6 +1192,11 @@ export const getRoute = async (start: Location, end: Location, mode: TravelMode 
             start,
             end,
             mode,
+            modes: {
+                drive: modes.drive?.eta || 'N/A',
+                motorcycle: modes.motorcycle?.eta || 'N/A',
+                walk: modes.walk?.eta || 'N/A'
+            }
         };
     } catch (error) {
         logger.error("Failed to fetch route gracefully", error);

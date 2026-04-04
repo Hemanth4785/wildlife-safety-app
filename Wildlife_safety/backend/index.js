@@ -941,89 +941,77 @@ app.get('/api/route/osrm', async (req, res) => {
 
     // --- Helper: OSRM Logic ---
     const fetchOsrmRoute = async () => {
+        const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+        const sLon = String(startLon).trim();
+        const sLat = String(startLat).trim();
+        const eLon = String(endLon).trim();
+        const eLat = String(endLat).trim();
+        const coords = `${sLon},${sLat};${eLon},${eLat}`;
+
+        const formatDuration = (seconds) => {
+            if (!seconds) return 'N/A';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.round((seconds % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        };
+
+        const fetchSingleProfile = async (profile) => {
+            const url = `${OSRM_BASE_URL}/route/v1/${profile}/${coords}?overview=full&geometries=geojson&radiuses=3000;3000`;
+            try {
+                const response = await axios.get(url, {
+                    timeout: 15000,
+                    headers: { 'User-Agent': 'WildlifeSafetyApp/1.0', 'Accept': 'application/json' }
+                });
+                return response.data.routes?.[0] || null;
+            } catch (e) {
+                console.error(`[OSRM] Profile ${profile} failed:`, e.message);
+                return null;
+            }
+        };
+
         try {
-            console.log('[Route] Routing via OSRM');
-            // Try HTTPS first, then fallback to HTTP if needed.
-            const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
-            
-            let osrmProfile = 'driving';
-            if (process.env.OSRM_BASE_URL) {
-                if (mode === 'walk') osrmProfile = 'foot';
-                else if (mode === 'bike') osrmProfile = 'bike';
-            }
-            
-            const sLon = String(startLon).trim();
-            const sLat = String(startLat).trim();
-            const eLon = String(endLon).trim();
-            const eLat = String(endLat).trim();
+            console.log('[Route] Routing via Multi-mode OSRM');
+            const [driveRoute, walkRoute] = await Promise.all([
+                fetchSingleProfile('driving'),
+                fetchSingleProfile('foot')
+            ]);
 
-            // Use 'radiuses' parameter to help OSRM snap to nearest road (even if it's 3km away)
-            const url = `${OSRM_BASE_URL}/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson&radiuses=3000;3000`;
-            console.log(`[OSRM] Fetching URL: ${url}`);
-            
-            const response = await axios.get(url, { 
-                timeout: 20000, // Increased timeout to 20s
-                headers: { 
-                    'User-Agent': 'WildlifeSafetyApp/1.0',
-                    'Accept': 'application/json'
-                },
-                validateStatus: (status) => status < 500 
-            });
-
-            if (response.status !== 200) {
-                console.error(`[OSRM] Request failed with status ${response.status}:`, JSON.stringify(response.data));
-                
-                // Fallback: Try the lz4 mirror if the primary is down/failing
-                if (OSRM_BASE_URL === 'https://router.project-osrm.org') {
-                    console.warn('[OSRM] Trying fallback mirror...');
-                    const fallbackUrl = `https://lz4.overpass-api.de/osrm/route/v1/${osrmProfile}/${sLon},${sLat};${eLon},${eLat}?overview=full&geometries=geojson&radiuses=3000;3000`;
-                    try {
-                         const fallbackRes = await axios.get(fallbackUrl, { timeout: 15000 });
-                         if (fallbackRes.data && fallbackRes.data.routes && fallbackRes.data.routes.length > 0) {
-                             console.log('[OSRM] Success using fallback mirror!');
-                             const route = fallbackRes.data.routes[0];
-                             return {
-                                geometry: route.geometry,
-                                distance: route.distance,
-                                duration: route.duration,
-                                status: 'success',
-                                source: 'osrm_fallback'
-                             };
-                         }
-                    } catch (e) {
-                         console.error('[OSRM] Fallback mirror failed too.');
-                    }
-                }
-                return { status: 'failed', error: `HTTP ${response.status}` };
+            if (!driveRoute && !walkRoute) {
+                return { status: 'failed', error: 'All OSRM profiles failed' };
             }
 
-            if (!response.data.routes || response.data.routes.length === 0) {
-                console.warn('[OSRM] WARNING: No routes found in response data.');
-                return { status: 'failed', error: 'No OSRM route found' };
-            }
-            
-            const route = response.data.routes[0];
-            const pointCount = route.geometry?.coordinates?.length || 0;
-            
-            console.log(`[OSRM] Geometry points: ${pointCount}`);
-            if (pointCount <= 2) {
-                console.warn('[OSRM] WARNING: OSRM returned only 2 points (likely straight line).');
-                return { status: 'failed', error: 'osrm_two_points' };
-            }
-            console.log('[OSRM] SUCCESS: Using OSRM route.');
+            const primaryRoute = driveRoute || walkRoute;
+            const driveDuration = driveRoute?.duration || 0;
+            const walkDuration = walkRoute?.duration || 0;
+            // Motorcycle is slightly slower than car in mixed terrain (1.15x factor)
+            const motoDuration = driveDuration ? Math.round(driveDuration * 1.15) : 0;
 
             return {
-                geometry: route.geometry,
-                distance: route.distance,
-                duration: route.duration,
                 status: 'success',
-                source: 'osrm'
+                source: 'osrm_multi',
+                geometry: primaryRoute.geometry,
+                distance: primaryRoute.distance,
+                duration: primaryRoute.duration,
+                modes: {
+                    drive: {
+                        duration: driveDuration,
+                        distance: driveRoute?.distance || 0,
+                        eta: formatDuration(driveDuration)
+                    },
+                    motorcycle: {
+                        duration: motoDuration,
+                        distance: driveRoute?.distance || 0,
+                        eta: formatDuration(motoDuration)
+                    },
+                    walk: {
+                        duration: walkDuration,
+                        distance: walkRoute?.distance || 0,
+                        eta: formatDuration(walkDuration)
+                    }
+                }
             };
         } catch (error) {
             console.error("[OSRM] CRITICAL ERROR:", error.message);
-            if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-                console.error("[OSRM] Service unreachable. Check your internet connection.");
-            }
             return { status: 'failed', error: error.message };
         }
     };
