@@ -59,6 +59,7 @@ const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs =
 
 type MlPredictResult = {
     path: { lat: number; lon: number; address?: string }[];
+    predictions?: any[];
     raw: any;
     error?: boolean;
     message?: string;
@@ -105,7 +106,7 @@ const mlPredictMovement = async (mlUrl: string, payload: any): Promise<MlPredict
             })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
             : [];
 
-        return { path, raw };
+        return { path, raw, predictions: Array.isArray(raw?.predictions) ? raw.predictions : undefined };
     } catch (e: any) {
         logger.warn('[ML] predict failed', e);
         return { path: [], raw: {}, error: true, message: 'Prediction failed' };
