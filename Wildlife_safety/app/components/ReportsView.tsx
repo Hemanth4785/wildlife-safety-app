@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import type { Report } from '../types';
 import { PlusIcon, CalendarIcon, LocationMarkerIcon, AlertTriangleIcon, CameraIcon, TrashIcon } from './icons';
@@ -251,7 +252,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
     };
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Wildlife Reports</Text>
                 <Text style={styles.headerSubtitle}>Help keep the community safe</Text>
@@ -438,7 +439,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ onAddReport }) => {
                     </View>
                 )}
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 };
 

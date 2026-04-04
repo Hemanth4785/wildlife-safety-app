@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface LoginViewProps {
     onLogin: (email: string, pass: string) => Promise<string | null>;
@@ -51,10 +52,11 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
     };
 
     return (
-        <KeyboardAvoidingView 
-            style={styles.container} 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <KeyboardAvoidingView 
+                style={{ flex: 1 }} 
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
             <ScrollView 
                 contentContainerStyle={styles.scrollContent}
                 keyboardShouldPersistTaps="handled"
@@ -113,6 +115,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onSwitchToSignup }: Logi
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 };
 

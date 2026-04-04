@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import { User, View as ViewType } from '../types';
 import { AVATARS, NEARBY_KM } from '../constants';
@@ -107,19 +108,20 @@ const ProfileView: React.FC<ProfileViewProps> = (props: ProfileViewProps) => {
     }, []);
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-            <View style={styles.header}>
-                <View style={styles.avatarContainer}>
-                    <View style={styles.avatarWrapper}>
-                        <AvatarComponent width={96} height={96} />
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <ScrollView contentContainerStyle={styles.contentContainer}>
+                <View style={styles.header}>
+                    <View style={styles.avatarContainer}>
+                        <View style={styles.avatarWrapper}>
+                            <AvatarComponent width={96} height={96} />
+                        </View>
+                        <TouchableOpacity 
+                            onPress={() => setIsModalOpen(true)}
+                            style={styles.editAvatarButton}
+                        >
+                            <EditIcon width={16} height={16} color="#ffffff" />
+                        </TouchableOpacity>
                     </View>
-                    <TouchableOpacity 
-                        onPress={() => setIsModalOpen(true)}
-                        style={styles.editAvatarButton}
-                    >
-                        <EditIcon width={16} height={16} color="#ffffff" />
-                    </TouchableOpacity>
-                </View>
                 <View style={styles.nameSection}>
                     {!isEditingName ? (
                         <View style={styles.nameRow}>
@@ -253,7 +255,8 @@ const ProfileView: React.FC<ProfileViewProps> = (props: ProfileViewProps) => {
                     onSave={handleAvatarSave}
                 />
             )}
-        </ScrollView>
+            </ScrollView>
+        </SafeAreaView>
     );
 };
 
