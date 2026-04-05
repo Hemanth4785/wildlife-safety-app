@@ -46,16 +46,6 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Wildlife Safety to use your location to provide safe route predictions."
         }
-      ],
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "Allow Wildlife Safety to use the microphone for voice input.",
-          "speechRecognitionPermission": "Allow Wildlife Safety to recognize your speech.",
-          "androidSpeechServicePackages": [
-            "com.google.android.googlequicksearchbox"
-          ]
-        }
       ]
     ],
     "updates": {

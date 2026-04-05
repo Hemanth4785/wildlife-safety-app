@@ -22,3 +22,11 @@ build/
 
 # Documentation
 *.md
+
+node_modules/
+android/
+ios/
+.expo/
+*.log
+gbif_env/
+lstm_env/
