@@ -1125,81 +1125,85 @@ const safeReverseGeocode = async (lat, lon) => {
   const key = `${latKey},${lonKey}`;
 
   if (geocodeCacheData[key]) {
-    const cached = geocodeCacheData[key];
-    const addr = cached?.address || {};
-    
-    // More specific names: suburb, neighbourhood, road, village, hamlet
-    const primary = addr.national_park || addr.nature_reserve || addr.protected_area ||
-                  addr.forest || addr.wood || addr.wildlife_sanctuary;
-    const specific = addr.suburb || addr.neighbourhood || addr.road || addr.hamlet || addr.village;
-    const settlement = addr.town || addr.city;
-    const district = addr.state_district || addr.county || addr.state;
-
-    let name = '';
-    if (primary) {
-      name = specific && specific !== primary ? `${specific}, ${primary}` : primary;
-    } else if (specific) {
-      name = settlement && settlement !== specific ? `${specific}, ${settlement}` : specific;
-    } else {
-      name = settlement && district ? `${settlement}, ${district}` : (cached?.display_name || '');
+    // If it's a string, it's our new format. If it's an object, it's the old Nominatim format.
+    if (typeof geocodeCacheData[key] === 'string') {
+        return geocodeCacheData[key];
     }
-    
-    return String(name).trim() || `Unknown wildlife area near (${latKey}, ${lonKey})`;
   }
 
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn('[Geocode] No GOOGLE_MAPS_API_KEY found, falling back to Nominatim');
     try {
         const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
-            params: { 
-                lat, lon, format: 'json', zoom: 18, addressdetails: 1,
-                email: 'hemac@example.com' // Nominatim likes having an email in params too
-            },
-            headers: { 
-                'User-Agent': 'WildlifeSafetyApp-Edu-Research-v1.1',
-                'Accept-Language': 'en'
-            },
+            params: { lat, lon, format: 'json', zoom: 18, addressdetails: 1, email: 'hemac@example.com' },
+            headers: { 'User-Agent': 'WildlifeSafetyApp-Edu-v1.1', 'Accept-Language': 'en' },
             timeout: 10000 
         });
-    
-    const data = response.data || {};
-    geocodeCacheData[key] = data;
-    persistentCache.save('geocode_cache.json', geocodeCacheData);
-    
-    const addr = data.address || {};
-    const primary =
-      addr.national_park || addr.nature_reserve || addr.protected_area ||
-      addr.forest || addr.wood || addr.wildlife_sanctuary;
-    
-    // More specific names: suburb, neighbourhood, road, village, hamlet
-    const specific = addr.suburb || addr.neighbourhood || addr.road || addr.hamlet || addr.village;
-    const settlement = addr.town || addr.city;
-    const district = addr.state_district || addr.county || addr.state;
+        const data = response.data || {};
+        const addr = data.address || {};
+        const primary = addr.national_park || addr.nature_reserve || addr.forest || addr.wood || addr.wildlife_sanctuary;
+        const specific = addr.suburb || addr.neighbourhood || addr.road || addr.village || addr.hamlet;
+        const settlement = addr.town || addr.city;
+        
+        let name = '';
+        if (primary) name = specific ? `${specific}, ${primary}` : primary;
+        else if (specific) name = settlement ? `${specific}, ${settlement}` : specific;
+        else name = settlement || data.display_name || `Area (${latKey}, ${lonKey})`;
+        
+        const finalName = String(name).trim();
+        geocodeCacheData[key] = finalName;
+        persistentCache.save('geocode_cache.json', geocodeCacheData);
+        return finalName;
+    } catch (e) {
+        return `Area (${latKey}, ${lonKey})`;
+    }
+  }
 
-    if (primary) {
-      if (specific && specific !== primary) {
-        return `${String(specific).trim()}, ${String(primary).trim()}`;
+  try {
+    // Use Google Maps Reverse Geocoding with specific result types for better detail
+    const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: {
+        latlng: `${lat},${lon}`,
+        key: apiKey,
+        result_type: 'sublocality|neighborhood|premise|route|natural_feature|park',
+        language: 'en'
+      },
+      timeout: 10000
+    });
+
+    const results = response.data?.results || [];
+    let name = '';
+
+    if (results.length > 0) {
+      // Pick the most specific result
+      name = results[0].formatted_address;
+      // Shorten the address if it's too long (e.g., remove country/state if possible)
+      const parts = name.split(',');
+      if (parts.length > 2) {
+        name = parts.slice(0, 2).join(',').trim();
       }
-      return String(primary).trim();
-    }
-    
-    if (specific) {
-        if (settlement && settlement !== specific) {
-            return `${String(specific).trim()}, ${String(settlement).trim()}`;
-        }
-        return String(specific).trim();
+    } else {
+      // Fallback: try without result_type filter to get at least something
+      const fallbackResponse = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: { latlng: `${lat},${lon}`, key: apiKey, language: 'en' },
+        timeout: 5000
+      });
+      const fallbackResults = fallbackResponse.data?.results || [];
+      if (fallbackResults.length > 0) {
+        const parts = fallbackResults[0].formatted_address.split(',');
+        name = parts.length > 1 ? parts[0].trim() : fallbackResults[0].formatted_address;
+      }
     }
 
-    if (settlement && district) {
-      return `${String(settlement).trim()}, ${String(district).trim()}`;
-    }
-    if (data.display_name) {
-      const first = String(data.display_name).split(',')[0].trim();
-      if (first) return first;
-      return String(data.display_name).trim();
-    }
-    return `Unknown wildlife area near (${latKey}, ${lonKey})`;
+    const finalName = name || `Area (${latKey}, ${lonKey})`;
+    geocodeCacheData[key] = finalName;
+    persistentCache.save('geocode_cache.json', geocodeCacheData);
+    return finalName;
+
   } catch (error) {
-    console.error('[InternalGeocode] Failed:', error.message);
-    return `Unknown wildlife area near (${latKey}, ${lonKey})`;
+    console.error('[GoogleGeocode] Failed:', error.message);
+    return `Area (${latKey}, ${lonKey})`;
   }
 };
 
@@ -1847,20 +1851,51 @@ app.post('/api/predict-movement', async (req, res) => {
         const rfResult = await predictRiskML(rfPayload);
         const riskLevel = String(rfResult.risk || 'Medium').toUpperCase();
 
-        // Reverse Geocoding for output locations (Sequential to avoid Nominatim 403 blocks)
+        // Reverse Geocoding for output locations
         const names = [];
-        for (const pt of predictedPositions) {
-            const name = await safeReverseGeocode(pt.lat, pt.lon);
-            names.push(name);
-            // Small delay if not the last point to respect 1 req/sec policy (increased to 1.5s)
-            if (predictedPositions.indexOf(pt) < predictedPositions.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1500));
+        const seenNames = new Map();
+
+        for (let i = 0; i < predictedPositions.length; i++) {
+            const pt = predictedPositions[i];
+            let name = await safeReverseGeocode(pt.lat, pt.lon);
+            
+            // Check for duplicate names among nearby points (within 0.5km)
+            let isDuplicate = false;
+            for (let j = 0; j < i; j++) {
+                const prevPt = predictedPositions[j];
+                const prevName = names[j];
+                const dist = haversineDistanceKm(pt.lat, pt.lon, prevPt.lat, prevPt.lon);
+                
+                // If names are same and points are close, handle as "Near [Place] #N"
+                if (name === prevName && dist < 0.5) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+
+            if (isDuplicate) {
+                const count = (seenNames.get(name) || 1) + 1;
+                seenNames.set(name, count);
+                // We'll update the previous one if it didn't have a #1 yet
+                if (count === 2) {
+                    const firstIdx = names.indexOf(name);
+                    if (firstIdx !== -1) names[firstIdx] = `Near ${name} #1`;
+                }
+                names.push(`Near ${name} #${count}`);
+            } else {
+                if (!seenNames.has(name)) seenNames.set(name, 1);
+                names.push(name);
+            }
+
+            // Small delay to respect API limits if not cached
+            if (i < predictedPositions.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
         }
 
         const predictedLocations = predictedPositions.map((pt, i) => ({
             step: i + 1,
-            location: names[i] || `Wildlife Area (${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})`,
+            location: names[i] || `Area (${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})`,
             lat: pt.lat,
             lon: pt.lon
         }));

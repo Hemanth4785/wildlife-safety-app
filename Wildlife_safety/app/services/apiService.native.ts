@@ -717,8 +717,44 @@ export const predictMovement = async (
                     lon: Number(p?.lon),
                     address: String(p?.address || 'Wildlife corridor'),
                 }));
+                
                 try {
-                    const names = await Promise.all(path.map((p: any) => reverseGeocode(p.lat, p.lon)));
+                    const rawNames = await Promise.all(path.map((p: any) => reverseGeocode(p.lat, p.lon)));
+                    const names: string[] = [];
+                    const seenNames = new Map<string, number>();
+
+                    for (let i = 0; i < path.length; i++) {
+                        const pt = path[i];
+                        const name = rawNames[i];
+                        
+                        // Check for duplicate names among nearby points (within 0.5km)
+                        let isDuplicate = false;
+                        for (let j = 0; j < i; j++) {
+                            const prevPt = path[j];
+                            const prevName = names[j];
+                            const dLat = pt.lat - prevPt.lat;
+                            const dLon = pt.lon - prevPt.lon;
+                            const distApprox = Math.sqrt(dLat * dLat + dLon * dLon) * 111; // 1 deg ~ 111km
+                            
+                            if (name === prevName && distApprox < 0.5) {
+                                isDuplicate = true;
+                                break;
+                            }
+                        }
+
+                        if (isDuplicate) {
+                            const count = (seenNames.get(name) || 1) + 1;
+                            seenNames.set(name, count);
+                            if (count === 2) {
+                                const firstIdx = names.indexOf(name);
+                                if (firstIdx !== -1) names[firstIdx] = `Near ${name} #1`;
+                            }
+                            names.push(`Near ${name} #${count}`);
+                        } else {
+                            if (!seenNames.has(name)) seenNames.set(name, 1);
+                            names.push(name);
+                        }
+                    }
                     path = path.map((p: any, i: number) => ({ ...p, address: String(names[i] || p.address || 'Wildlife corridor') }));
                 } catch {}
 
