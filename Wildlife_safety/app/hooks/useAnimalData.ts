@@ -506,6 +506,8 @@ export const useAnimalData = (shouldFetch: boolean = false) => {
         setNavigationStats(null);
         setNavigationAlert(null);
         setSafeRoute(null);
+        setRiskZones([]);
+        setRiskySegments([]);
         // Do NOT clear safe places here so they remain visible on the map
         setIsApproachingStart(false);
         isApproachingStartRef.current = false;

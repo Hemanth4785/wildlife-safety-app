@@ -1127,11 +1127,23 @@ const safeReverseGeocode = async (lat, lon) => {
   if (geocodeCacheData[key]) {
     const cached = geocodeCacheData[key];
     const addr = cached?.address || {};
-    const name =
-      addr.national_park || addr.nature_reserve || addr.protected_area ||
-      addr.forest || addr.wood || addr.wildlife_sanctuary ||
-      addr.village || addr.hamlet || addr.town || addr.city ||
-      cached?.display_name || '';
+    
+    // More specific names: suburb, neighbourhood, road, village, hamlet
+    const primary = addr.national_park || addr.nature_reserve || addr.protected_area ||
+                  addr.forest || addr.wood || addr.wildlife_sanctuary;
+    const specific = addr.suburb || addr.neighbourhood || addr.road || addr.hamlet || addr.village;
+    const settlement = addr.town || addr.city;
+    const district = addr.state_district || addr.county || addr.state;
+
+    let name = '';
+    if (primary) {
+      name = specific && specific !== primary ? `${specific}, ${primary}` : primary;
+    } else if (specific) {
+      name = settlement && settlement !== specific ? `${specific}, ${settlement}` : specific;
+    } else {
+      name = settlement && district ? `${settlement}, ${district}` : (cached?.display_name || '');
+    }
+    
     return String(name).trim() || `Unknown wildlife area near (${latKey}, ${lonKey})`;
   }
 
@@ -1156,11 +1168,26 @@ const safeReverseGeocode = async (lat, lon) => {
     const primary =
       addr.national_park || addr.nature_reserve || addr.protected_area ||
       addr.forest || addr.wood || addr.wildlife_sanctuary;
-    const settlement = addr.village || addr.hamlet || addr.suburb || addr.town || addr.city;
+    
+    // More specific names: suburb, neighbourhood, road, village, hamlet
+    const specific = addr.suburb || addr.neighbourhood || addr.road || addr.hamlet || addr.village;
+    const settlement = addr.town || addr.city;
     const district = addr.state_district || addr.county || addr.state;
+
     if (primary) {
+      if (specific && specific !== primary) {
+        return `${String(specific).trim()}, ${String(primary).trim()}`;
+      }
       return String(primary).trim();
     }
+    
+    if (specific) {
+        if (settlement && settlement !== specific) {
+            return `${String(specific).trim()}, ${String(settlement).trim()}`;
+        }
+        return String(specific).trim();
+    }
+
     if (settlement && district) {
       return `${String(settlement).trim()}, ${String(district).trim()}`;
     }

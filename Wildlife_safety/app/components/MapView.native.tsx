@@ -11,7 +11,7 @@ import { API_BASE_URL, CONFIG } from '../config';
 import { FilterIcon, PlayIcon, PauseIcon, AlertTriangleIcon, InfoIcon, StopIcon, XIcon, PaperPlaneIcon, SpinnerIcon, ErrorIcon, LocationMarkerIcon, SyncIcon, RainIcon, CarIcon, WalkIcon, BikeIcon, BusIcon, ChartIcon } from './icons';
 import { LoadingOverlay } from './LoadingOverlay';
 import * as api from '../services/apiService';
-import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistanceToPolyline } from '../services/geoService';
+import { formatDistance, formatDuration, formatArrivalTime, calculateMinDistanceToPolyline, calculateDistance } from '../services/geoService';
 import PredictionPanel from './PredictionPanel';
 import { useAppContext } from '../contexts/AppContext';
 import { stableRoutePathKey, stableJsonKey } from '../utils/stableKeys';
@@ -570,9 +570,25 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
     // Stable derived state
     const filteredPredictions = useMemo(() => {
         if (!Array.isArray(predictions)) return [];
-        if (!visibleAnimals || typeof visibleAnimals !== 'object') return predictions;
-        return predictions.filter(p => p && visibleAnimals[p.scientific] !== false);
-    }, [predictionsFilterKey, visibleAnimalsKey]);
+        
+        // Issue 3: Hide predictions unless navigating or planning a route
+        if (!showPredictions || (!isNavigating && !hasRoute)) return [];
+
+        const currentLoc = liveLocation || userLocation;
+
+        const filteredBySpecies = predictions.filter(p => 
+            p && (visibleAnimals && (visibleAnimals as any)[canonicalScientific(p.scientific)] !== false)
+        );
+
+        // Issue 1: Filter by Nearby Alert Radius
+        return filteredBySpecies.filter(p => {
+            if (currentLoc && nearbyRadiusKm && p?.current) {
+                const dist = calculateDistance(currentLoc, { lat: Number(p.current.lat), lon: Number(p.current.lon) });
+                if (dist > nearbyRadiusKm) return false;
+            }
+            return true;
+        });
+    }, [predictionsFilterKey, visibleAnimalsKey, isNavigating, hasRoute, liveLocation, userLocation, nearbyRadiusKm, showPredictions, predictions]);
 
     // LSTM Prediction State - STABLE initialization
     const [predictedPath, setPredictedPath] = useState<{ lat: number, lon: number, address: string }[]>([]);
@@ -935,17 +951,27 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     // Flatten data for markers to ensure stable keys and no undefined access
     const reportMarkers = useMemo(() => {
+        // Issue 3: Hide markers unless navigating or planning a route
+        if (!showAnimalMarkers || (!isNavigating && !hasRoute)) return [];
+
+        const currentLoc = liveLocation || userLocation;
+
         const base = reports.filter(
             (r) => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))
         );
-        if (base.length > 0) return base;
-        if (showFallbackDemo) {
-            return FALLBACK_REPORTS.filter(
+        const markers = base.length > 0 ? base : (showFallbackDemo ? FALLBACK_REPORTS.filter(
                 (r) => r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon))
-            );
-        }
-        return [];
-    }, [reportsKey, reports, showFallbackDemo]);
+            ) : []);
+
+        // Issue 1: Filter by Nearby Alert Radius
+        return markers.filter(r => {
+            if (currentLoc && nearbyRadiusKm) {
+                const dist = calculateDistance(currentLoc, { lat: Number(r.lat), lon: Number(r.lon) });
+                if (dist > nearbyRadiusKm) return false;
+            }
+            return true;
+        });
+    }, [reportsKey, reports, showFallbackDemo, isNavigating, hasRoute, liveLocation, userLocation, nearbyRadiusKm, showAnimalMarkers]);
 
     const recentSightingsForMap = useMemo(() => {
         const valid = recentSightings.filter(
@@ -975,9 +1001,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
 
     // NEW: Conditional marker logic based on route activity
     const animalMarkers = useMemo(() => {
-        if (!showAnimalMarkers) return [];
+        // Issue 3: Hide markers unless navigating or planning a route
+        if (!showAnimalMarkers || (!isNavigating && !hasRoute)) return [];
 
-        // Combine recent sightings and risk zones to ensure all relevant animals are visible
+        const currentLoc = liveLocation || userLocation;
+
+        // Combine recent sightings and risk zones
         const combined = [...(recentSightingsForMap || [])];
         if (Array.isArray(riskZones)) {
             riskZones.forEach(zone => {
@@ -992,12 +1021,12 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             });
         }
 
-        // Apply species filter (visibleAnimals) and ensure coords exist
+        // Apply species filter and RADIUS filter (Issue 1)
         return combined.filter(s => {
             if (!s) return false;
             const sci = s.scientificName || s.scientific_name;
-            const lat = s.lat;
-            const lon = s.lon;
+            const lat = Number(s.lat);
+            const lon = Number(s.lon);
             
             if (!lat || !lon) return false;
             
@@ -1005,10 +1034,16 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
             if (sci && visibleAnimals && (visibleAnimals as any)[canonicalScientific(String(sci))] === false) {
                 return false;
             }
+
+            // Issue 1: Filter by Nearby Alert Radius
+            if (currentLoc && nearbyRadiusKm) {
+                const dist = calculateDistance(currentLoc, { lat, lon });
+                if (dist > nearbyRadiusKm) return false;
+            }
             
             return true;
         });
-    }, [showAnimalMarkers, routePathKey, recentSightingsKey, riskZonesKey, visibleAnimalsKey, recentSightingsForMap]);
+    }, [showAnimalMarkers, isNavigating, hasRoute, liveLocation, userLocation, nearbyRadiusKm, recentSightingsKey, riskZonesKey, visibleAnimalsKey, recentSightingsForMap]);
     
     // 🔎 STEP 1 – LOG RAW DATA
     const isRouteActive = !!(safeRoute?.path && safeRoute.path.length > 0);
@@ -1042,18 +1077,27 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         setMapRegion({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta });
                     }}
                 >
-                    {/* 1. RISK CIRCLES (Bottom Layer) */}
-                    {(Array.isArray(riskZones) ? riskZones : []).map((zone, index) => (
-                        <Circle
-                            key={`risk-circle-${zone?.id ?? 'z'}-${index}-${Number(zone?.lat)}-${Number(zone?.lon)}`}
-                            center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
-                            radius={2000}
-                            fillColor="rgba(255, 0, 0, 0.12)"
-                            strokeColor="rgba(255, 0, 0, 0.3)"
-                            strokeWidth={1}
-                            zIndex={1}
-                        />
-                    ))}
+                    {/* 1. RISK CIRCLES (Bottom Layer) - ONLY SHOWN WHEN ROUTE IS ACTIVE (Issue 3) */}
+                    {(isNavigating || hasRoute) && (Array.isArray(riskZones) ? riskZones : []).map((zone, index) => {
+                         // Issue 1: Apply radius filter to circles too
+                         const currentLoc = liveLocation || userLocation;
+                         if (currentLoc && nearbyRadiusKm) {
+                             const dist = calculateDistance(currentLoc, { lat: Number(zone.lat), lon: Number(zone.lon) });
+                             if (dist > nearbyRadiusKm) return null;
+                         }
+                         
+                         return (
+                            <Circle
+                                key={`risk-circle-${zone?.id ?? 'z'}-${index}-${Number(zone?.lat)}-${Number(zone?.lon)}`}
+                                center={{ latitude: Number(zone.lat), longitude: Number(zone.lon) }}
+                                radius={2000}
+                                fillColor="rgba(255, 0, 0, 0.12)"
+                                strokeColor="rgba(255, 0, 0, 0.3)"
+                                strokeWidth={1}
+                                zIndex={1}
+                            />
+                        );
+                    })}
 
                     {/* 2. ROUTE POLYLINES */}
                     {Array.isArray(safeRoutePolylineCoords) && safeRoutePolylineCoords.length > 0 && (
@@ -1170,8 +1214,8 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         />
                     )}
 
-                    {/* 6. ADDITIONAL OVERLAYS (Predictions, Reports, etc.) */}
-                    {uiMode === UIMode.PREDICTION && Array.isArray(predictedPolylineCoords) && predictedPolylineCoords.length > 0 && (
+                    {/* 6. ADDITIONAL OVERLAYS (Predictions, Reports, etc.) - HIDDEN IF NO ACTIVE ROUTE (Issue 3) */}
+                    {(isNavigating || hasRoute) && uiMode === UIMode.PREDICTION && Array.isArray(predictedPolylineCoords) && predictedPolylineCoords.length > 0 && (
                         <Polyline
                             key="prediction-line"
                             coordinates={predictedPolylineCoords}
@@ -1185,7 +1229,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         />
                     )}
 
-                    {uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.map((p, index) => (
+                    {(isNavigating || hasRoute) && uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.map((p, index) => (
                         <Marker
                             key={`pred-point-${index}`}
                             coordinate={{ latitude: p.lat, longitude: p.lon }}
@@ -1205,7 +1249,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                     ))}
 
                     {/* Last predicted location marker */}
-                    {uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.length > 0 && (
+                    {(isNavigating || hasRoute) && uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.length > 0 && (
                         <Marker
                             key="predicted-last"
                             coordinate={{ latitude: Number(predictedPath[predictedPath.length - 1]?.lat), longitude: Number(predictedPath[predictedPath.length - 1]?.lon) }}
@@ -1214,7 +1258,7 @@ const MapViewComponent: React.FC<MapViewProps> = (props) => {
                         />
                     )}
 
-                    {uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.length > 0 && (
+                    {(isNavigating || hasRoute) && uiMode === UIMode.PREDICTION && Array.isArray(predictedPath) && predictedPath.length > 0 && (
                         <Circle
                             key="predicted-danger"
                             center={{ latitude: Number(predictedPath[predictedPath.length - 1]?.lat), longitude: Number(predictedPath[predictedPath.length - 1]?.lon) }}
